@@ -1,0 +1,11 @@
+{
+	"wifi-ssid": "mannitidiriale",
+	"wifi-pwd":	"scartiloffista",
+	"mqtt-server": "broker.emqx.io",
+	"mqtt-port": 1883,
+	"mqtt-username": "mqtt-user",
+	"mqtt-pwd": "gesucristo"
+	"device-uid": "9999",
+	"topic-sub": "iotx/out",
+	"topic-pub": "iotx/in"
+}
