@@ -11,11 +11,11 @@
     <script type="text/javascript" src="./js/index.js"></script>
     <link rel="stylesheet" href="css/bootstrap.min.css" />
     <link rel="stylesheet" href="css/custom-style.css" />
-    <title>Configuration - I/Osa Domotix</title>
+    <title>Configuration - iotx</title>
   </head>
   <body>
 	<center>
-    <h1>I/Osa Domotix</h1>
+    <h1>IOT eXperience</h1>
     <h3>
       Configuration panel
     </h3>
@@ -42,15 +42,13 @@
 		<tr>
 			<td class="td-lx"><input class="button-style-on" type="submit" value="Save" /></td>
 			<td class="td-cx">&nbsp;</td>
-			<td class="td-lx"><input class="button-style-off" type="reset" value="Cancel" /></td>
+			<td class="td-lx"><a href="javascript:history.back()"><input class="button-style-off" type="button" value="Back" /></a></td>
 		</tr>
 	  </table>
 	</form>
 	</p>
-	<p>&nbsp;</p>
-	<p>&nbsp;</p>
     <p>
-      I/Osa Domotix v.1.0
+      IOT eXperience v.1.0
     </p>
    </center>
   </body>

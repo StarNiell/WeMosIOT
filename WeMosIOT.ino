@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <IRremote.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
@@ -9,20 +8,11 @@
 ESP8266WebServer server(80);
 //WiFiServer serverAP(8080);
 
-const uint16_t PIN_IR_RECV     = 12; //D6
-const uint16_t PIN_IR_SEND     = 13; //D7
 const uint16_t PIN_ON          = 0;  //D3 (pullup)
 const uint16_t PIN_OFF         = 14; //D5
 const uint16_t PIN_LED_GREEN   = 16; //D0
 const uint16_t PIN_LED_RED     = 5;  //D1
 const uint16_t PIN_MODE        = 15; //D8 (Pulldown)
-
-//Led strip
-uint16_t rawDataON[67] = {9380,4570, 480,670, 480,670, 530,620, 530,620, 530,670, 480,670, 480,670, 480,670, 480,1770, 480,1770, 480,1770, 480,1770, 480,670, 480,1770, 480,1770, 480,1770, 480,1770, 480,1770, 480,670, 480,670, 480,670, 480,670, 480,670, 530,670, 480,670, 480,670, 480,1770, 480,1770, 480,1720, 530,1770, 480,1770, 480,1770, 480};  // Protocol=NEC Address=0xEF00 Command=0x3 Raw-Data=0xFC03EF00 32 bits LSB first
-uint16_t rawDataOFF[67] = {9480,4520, 580,570, 580,570, 580,570, 580,570, 580,570, 580,570, 580,570, 580,570, 580,1670, 580,1670, 580,1670, 580,1670, 580,570, 580,1670, 580,1670, 580,1670, 580,570, 580,1670, 630,520, 630,520, 630,520, 630,570, 580,570, 580,570, 580,1670, 580,570, 630,1620, 630,1620, 580,1670, 580,1720, 580,1670, 580,1670, 580};  // Protocol=NEC Address=0xEF00 Command=0x2 Raw-Data=0xFD02EF00 32 bits LSB first
-
-//Air condit
-uint16_t khz = 38;
 
 bool lastConnectionStatus = false;
 String sid = "StarNiell WiFi";
@@ -107,7 +97,7 @@ bool saveConfiguration(const char *filename, const Config &config) {
   doc["mqtt-port"]      = config.mqtt_port;
   doc["mqtt-username"]  = config.mqtt_username;
   doc["mqtt-pwd"]       = config.mqtt_pwd;
-  doc["device-uid"]     = config.device_uid
+  doc["device-uid"]     = config.device_uid;
   doc["topic-sub"]      = config.topic_sub;
   doc["topic-pub"]      = config.topic_pub;
 
@@ -119,76 +109,51 @@ bool saveConfiguration(const char *filename, const Config &config) {
   // Close the file
   file.close();
 
+  GenerateIndexHtml(config);
+
   return true;
 }
 
-void IRSendOn() {
-  Serial.println("Send ON");
-  //IrSender.sendNEC(0xEF00, 0x3, 1); // strip led easy control ON
-  //IrSender.sendSamsung(0x7, 0x2, 1); // Samsung TV easy control ON/OFF
-  IrSender.sendRaw(rawDataON, sizeof(rawDataON), khz);
-  delay(500);
-}
-
-void IRSendOff() {
-  Serial.println("Send OFF");
-  //IrSender.sendNEC(0xEF00, 0x2, 1); // strip led easy control OFF
-  IrSender.sendRaw(rawDataOFF, sizeof(rawDataON), khz);
-  delay(500);
-}
-/*
-void readConnectionParams()
-{
+void GenerateIndexHtml(const Config &config) {
   String buffer = "";
-  File file = LittleFS.open("/store/wifissid.txt", "r");
-  while(file.available()){
-    buffer += file.readString();
-  } 
-  file.close();
-  sid = buffer;
-
-  file = LittleFS.open("/store/wifipwd.txt", "r");
-  buffer = "";
-  while(file.available()){
-    buffer += file.readString();
-  } 
-  file.close();
-  pwd = buffer;
-}
-
-bool writeConnectionParams(String sSSID, String sPWD)
-{
-  File file = LittleFS.open("/store/wifissid.txt", "w");
-  file.print(sSSID);
-  delay(1);
-  //Close the file
-  file.close();
-
-  file = LittleFS.open("/store/wifipwd.txt", "w");
-  file.print(sPWD);
-  delay(1);
-  //Close the file
-  file.close();
-
-  String buffer = "";
-  file = LittleFS.open("/config.static", "r");
+  File file = LittleFS.open("/index.static", "r");
   while(file.available()){
     buffer += file.readString();
   } 
   file.close();
 
-  buffer.replace("wifissid_value", sSSID);
-  buffer.replace("wifipassword_value", sPWD);
+  Serial.println(buffer);
+
+  char mqtt_port_str[6];
+  itoa(config.mqtt_port, mqtt_port_str, 10);
+
+  buffer.replace("wifi_ssid_value", config.wifi_ssid);
+  buffer.replace("wifi_pwd_value", config.wifi_pwd);
+  buffer.replace("mqtt_server_value", config.mqtt_server);
+  buffer.replace("mqtt_port_value", mqtt_port_str);
+  buffer.replace("mqtt_username_value", config.mqtt_username);
+  buffer.replace("mqtt_pwd_value", config.mqtt_pwd);
+  buffer.replace("device_uid_value", config.device_uid);
+  buffer.replace("topic_sub_value", config.topic_sub);
+  buffer.replace("topic_pub_value", config.topic_pub);
  
-  file = LittleFS.open("/config.html", "w");
+  file = LittleFS.open("/index.html", "w");
   file.print(buffer);
   delay(500);
   //Close the file
-  file.close();
+  file.close();  
 
-  return true;
+  Serial.println("file index saved");
+  Serial.println("");
+  Serial.println(config.wifi_ssid);
+  Serial.println("");
+  Serial.println("");
+
+  Serial.print(buffer);
+
+
 }
-*/
+
 void setupAP() {
   Serial.println("Entering AP Mode...");
   WiFi.softAP(sidAP, pwdAP);
@@ -201,8 +166,11 @@ void setupAP() {
   Serial.print("PWD : ");
   Serial.println(pwdAP);
 
-
   setupWebServer();
+}
+
+void setupMqtt() {
+
 }
 
 void setupWebServer()
@@ -213,72 +181,36 @@ void setupWebServer()
     server.send(404, "text/plain", "Landing page not found! you can chose: 'index.html' or 'config.html!");  
   });
  
-  server.on("/led", HTTP_POST, []() {    
-    
-    const String ledState = server.arg("ledstate");
-    if(ledState=="on"){
-      IRSendOn();
-    }
-    else if(ledState=="off"){
-      IRSendOff();
-    }
-    server.send(200, "text/json", "{\"result\":\"ok\"}");
-  });
-
   server.on("/saveconfig", HTTP_POST, []() {
-    String wfsid = server.arg("wifissid");
-    String wfpwd = server.arg("wifipwd");
+    strcpy(config.wifi_ssid,     server.arg("wifi_ssid").c_str());
+    strcpy(config.wifi_pwd,      server.arg("wifi_pwd").c_str());
+    strcpy(config.mqtt_server,   server.arg("mqtt_server").c_str());
+    config.mqtt_port =           atoi(server.arg("mqtt_port").c_str());
+    strcpy(config.mqtt_username, server.arg("mqtt_username").c_str());
+    strcpy(config.mqtt_pwd,      server.arg("mqtt_pwd").c_str());
+    strcpy(config.device_uid,    server.arg("device_uid").c_str());
+    strcpy(config.topic_sub,     server.arg("topic_sub").c_str());
+    strcpy(config.topic_pub,     server.arg("topic_pub").c_str());
+
     Serial.print("wfsid: ");
-    Serial.println(wfsid);
+    Serial.println(config.wifi_ssid);
     Serial.print("wfpwd: ");
-    Serial.println(wfpwd);
+    Serial.println(config.wifi_pwd);
 
     if (saveConfiguration(config_filename, config))
     {
-      server.send(200, "text/plane","WiFi Configuration saved! Please reboot the system.");
+      server.send(200, "text/plane","IOT eXperience Configuration saved! Please reboot the system.");
     }
     else
     {
-      server.send(500, "text/plane","Unable to save the WiFi Configuration! Please reboot the system and retry.");
+      server.send(500, "text/plane","Unable to save the IOT eXperience Configuration! Please reboot the system and retry.");
     }
   });
   server.begin();
 }
 
-void setupRemoteControl()
-{
-  Serial.println("Entering Remote Control Mode");
-
-  Serial.print("SSID: ");
-  Serial.println(sid);
-  Serial.print("PWD : ");
-  Serial.println(pwd);
-
-  WiFi.begin(sid, pwd);
-  Serial.print("Connecting...");
-  while(WiFi.status()!=WL_CONNECTED){ //Loop which makes a point every 500ms until the connection process has finished
-    delay(500);
-    Serial.print(".");
-  }
-  lastConnectionStatus = true;
-  Serial.println();
-  Serial.print("Connected! IP-Address: ");
-  Serial.println(WiFi.localIP()); //Displaying the IP Address
-  // if (MDNS.begin("nerd-corner")) {
-  //   Serial.println("DNS started, available with: ");
-  //   Serial.println("http://nerd-corner.local/");
-  // }
-  
-  setupWebServer();
-
-  digitalWrite(PIN_LED_RED, LOW);
-  digitalWrite(PIN_LED_GREEN, HIGH);
-}
-
 void setup() {
   Serial.begin(115200);
-  IrReceiver.begin(PIN_IR_RECV, ENABLE_LED_FEEDBACK);
-  IrSender.begin(PIN_IR_SEND);
   pinMode(PIN_ON, INPUT_PULLUP);
   pinMode(PIN_OFF, INPUT_PULLUP);
   pinMode(PIN_LED_GREEN, OUTPUT);
@@ -310,129 +242,12 @@ void setup() {
   Serial.print("config.mqtt_port: ");   Serial.println(config.mqtt_port);
 
   if (iMode == 0)
-    setupRemoteControl();
+    setupMqtt();
   else
     setupAP();
 }
 
-void handleControl() {
-  if (digitalRead(PIN_ON) == LOW)
-  {
-    IRSendOn();
-  }
-  if (digitalRead(PIN_OFF) == LOW)
-  {
-    IRSendOff();
-  }
-}
-
-/*
-void serverAPLoop()
-{
-  String buffer = "";
-  WiFiClient client = serverAP.available();   // attesa di nuovi client
-  if (client) { 
-    Serial.println("New Client.");
-    String currentLine = "";  
-    while (client.connected()) {            // loop while the client's connected
-      if (client.available()) {     
-        char c = client.read();             // read a byte, then
-        //Serial.write(c);                    // print it out the serial monitor
-        buffer += c;
-        if (c == '\n') {                    // if the byte is a newline character
-          Serial.println(buffer);
-          if (buffer.startsWith("GET /"))
-          {
-            Serial.println("Arrivato GET..................................................");
-          }
-          buffer = "";
-          // if the current line is blank, you got two newline characters in a row.
-          // that's the end of the client HTTP request, so send a response:
-          if (currentLine.length() == 0) {
-            // HTTP headers always start with a response code (e.g. HTTP/1.1 200 OK)
-            // and a content-type so the client knows what's coming, then a blank line:
-            client.println("HTTP/1.1 200 OK");
-            client.println("Content-type:text/html");
-            client.println();
-
-            String buff = "";
-            File file = LittleFS.open("/config.html", "r");
-            while(file.available()){
-              buff += file.readString();
-            } 
-
-            buff.replace("wifissid_value", sid);
-            buff.replace("wifipassword_value", pwd);
-            //Serial.println(buff);
-            client.print(buff);
-
-            break;
-          } else {    // if you got a newline, then clear currentLine:
-            currentLine = "";
-          }
-        } else if (c != '\r') {  // if you got anything else but a carriage return character,
-          currentLine += c;      // add it to the end of the currentLine
-        }
-
-      }
-    }
-    // close the connection:
-    client.stop();
-    Serial.println("Client Disconnected.");  
-  }  
-}
-*/
-
 void loop() {
-  if (IrReceiver.decode())
-  {
-    Serial.println(IrReceiver.decodedIRData.decodedRawData, HEX);
-    //IrReceiver.printIRResultShort(&Serial);
-    //IrReceiver.printIRSendUsage(&Serial);
-    IrReceiver.printIRResultRawFormatted(&Serial);
-    IrReceiver.resume();
-  }
-
-  handleControl(); // Manual control by switch
-
-  if (iMode == 0) // Remote Control Server
-  {
-    if (WiFi.status()!=WL_CONNECTED && lastConnectionStatus)
-    {
-      Serial.println("Connection lost");
-      lastConnectionStatus = false;
-      digitalWrite(PIN_LED_RED, HIGH);
-      digitalWrite(PIN_LED_GREEN, LOW);
-    }
-    else if (WiFi.status()==WL_CONNECTED && !lastConnectionStatus)
-    {
-      Serial.println("Connection established");
-      lastConnectionStatus = true;
-      digitalWrite(PIN_LED_RED, LOW);
-      digitalWrite(PIN_LED_GREEN, HIGH);
-    }
-    
-    if (!lastConnectionStatus)
-    {
-      if (digitalRead(PIN_LED_RED) == HIGH)
-        digitalWrite(PIN_LED_RED, LOW);
-      else
-        digitalWrite(PIN_LED_RED, HIGH);
-      delay(1000);
-    }
-
+  if (iMode == 1)
     server.handleClient();
-    //MDNS.update();
-  }
-  else // AP mode server
-  {
-    //serverAPLoop();
-      server.handleClient();
-
-    if (digitalRead(PIN_LED_GREEN) == HIGH)
-      digitalWrite(PIN_LED_GREEN, LOW);
-    else
-      digitalWrite(PIN_LED_GREEN, HIGH);
-    delay(1000);
-  }
 }
