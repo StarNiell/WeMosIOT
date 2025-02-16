@@ -28,6 +28,7 @@
 		<tr><td>Password</td><td><input type="text" name="wifi_pwd" value="wifi_pwd_value" /></td></tr>
 		<tr class="tr-space"><td colspan="2"></td></tr>
 		<tr><td class="td-title" colspan="2">MQTT</td></tr>
+		<tr><td>Device ID</td><td><input type="text" name="mqtt_deviceid" value="mqtt_deviceid_value" /></td></tr>
 		<tr><td>Server</td><td><input type="text" name="mqtt_server" value="mqtt_server_value" /></td></tr>
 		<tr><td>Port</td><td><input type="text" name="mqtt_port" value="mqtt_port_value" /></td></tr>
 		<tr><td>Username</td><td><input type="text" name="mqtt_user" value="mqtt_user_value" /></td></tr>

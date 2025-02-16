@@ -10,8 +10,8 @@ ESP8266WebServer server(80);
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
 
-const uint16_t PIN_ON          = 0;  //D3 (pullup)
-const uint16_t PIN_OFF         = 14; //D5
+const uint16_t PIN_ONOFF       = 0;  //D3 (pullup)
+const uint16_t PIN_MANUAL      = 14; //D5
 const uint16_t PIN_LED_GREEN   = 16; //D0
 const uint16_t PIN_LED_RED     = 5;  //D1
 const uint16_t PIN_MODE        = 15; //D8 (Pulldown)
@@ -64,12 +64,12 @@ void loadConfiguration(const char *filename, Config &config) {
   strlcpy(config.wifi_ssid,     doc["wifi-ssid"]      | "<YOUR WIFI SSID>", sizeof(config.wifi_ssid));
   strlcpy(config.wifi_pwd,      doc["wifi-pwd"]       | "<YOUR WIFI PWD>", sizeof(config.wifi_pwd));
   strlcpy(config.mqtt_server,   doc["mqtt-server"]    | "<MQTT SERVER>", sizeof(config.mqtt_server));
-  config.mqtt_port            = doc["mqtt-port"]      | 2731;
+  config.mqtt_port            = doc["mqtt-port"]      | 1883;
   strlcpy(config.mqtt_username, doc["mqtt-username"]  | "<MQTT USERNAME>", sizeof(config.mqtt_username));
   strlcpy(config.mqtt_pwd,      doc["mqtt-pwd"]       | "<MQTT PWD>", sizeof(config.mqtt_pwd));
-  strlcpy(config.device_uid,    doc["device-uid"]     | "<DEVICE UID>", sizeof(config.device_uid));
-  strlcpy(config.topic_sub,     doc["topic-sub"]      | "<TOPIC SUB>", sizeof(config.topic_sub));
-  strlcpy(config.topic_pub,     doc["topic-pub"]      | "<TOPIC PUB>", sizeof(config.topic_pub));
+  strlcpy(config.device_uid,    doc["device-uid"]     | "999", sizeof(config.device_uid));
+  strlcpy(config.topic_sub,     doc["topic-sub"]      | "iotx/in", sizeof(config.topic_sub));
+  strlcpy(config.topic_pub,     doc["topic-pub"]      | "iotx/out", sizeof(config.topic_pub));
 
   // Close the file (Curiously, File's destructor doesn't close the file)
   file.close();
@@ -95,6 +95,7 @@ bool saveConfiguration(const char *filename, const Config &config) {
   // Set the values in the document
   doc["wifi-ssid"]      = config.wifi_ssid; 
   doc["wifi-pwd"]       = config.wifi_pwd;
+  doc["mqtt-deviceid"]  = config.device_uid;
   doc["mqtt-server"]    = config.mqtt_server;
   doc["mqtt-port"]      = config.mqtt_port;
   doc["mqtt-username"]  = config.mqtt_username;
@@ -129,15 +130,16 @@ void GenerateIndexHtml(const Config &config) {
   char mqtt_port_str[6];
   itoa(config.mqtt_port, mqtt_port_str, 10);
 
-  buffer.replace("wifi_ssid_value", config.wifi_ssid);
-  buffer.replace("wifi_pwd_value", config.wifi_pwd);
-  buffer.replace("mqtt_server_value", config.mqtt_server);
-  buffer.replace("mqtt_port_value", mqtt_port_str);
-  buffer.replace("mqtt_user_value", config.mqtt_username);
-  buffer.replace("mqtt_pwd_value", config.mqtt_pwd);
-  buffer.replace("device_uid_value", config.device_uid);
-  buffer.replace("topic_sub_value", config.topic_sub);
-  buffer.replace("topic_pub_value", config.topic_pub);
+  buffer.replace("wifi_ssid_value",     config.wifi_ssid);
+  buffer.replace("wifi_pwd_value",      config.wifi_pwd);
+  buffer.replace("mqtt_deviceid_value", config.device_uid);
+  buffer.replace("mqtt_server_value",   config.mqtt_server);
+  buffer.replace("mqtt_port_value",     mqtt_port_str);
+  buffer.replace("mqtt_user_value",     config.mqtt_username);
+  buffer.replace("mqtt_pwd_value",      config.mqtt_pwd);
+  buffer.replace("mqtt_deviceid_value", config.device_uid);
+  buffer.replace("topic_sub_value",     config.topic_sub);
+  buffer.replace("topic_pub_value",     config.topic_pub);
  
   file = LittleFS.open("/index.html", "w");
   file.print(buffer);
@@ -171,16 +173,53 @@ void setupAP() {
   setupWebServer();
 }
 
-void mqttCallback(char *topic, byte *payload, unsigned int length) {
-  Serial.print("incoming: ");
-  Serial.println(topic);
-  Serial.print("Message:");
-    for (unsigned int i = 0; i < length; i++) {
-        Serial.print((char) payload[i]);
-    }
-    Serial.println();
-    Serial.println("-----------------------");
+void setAction(int value)
+{
+  if (value > 0)
+  {
+    digitalWrite(PIN_ONOFF, HIGH);
+  }
+  else
+  {
+    digitalWrite(PIN_ONOFF, LOW);
+  }
+}
 
+void mqttCallback(char *topic, byte *payload, unsigned int length) {
+  char received_topic[128];
+  char received_payload[128];
+  strcpy(received_topic, topic);
+  memcpy(received_payload, payload, length);
+
+  /*
+  Serial.print("incoming: ");
+  Serial.println(received_topic);
+  Serial.print("Message:");
+  Serial.println(received_payload);
+  Serial.println("-----------------------");
+  */
+
+  int idx = 0;
+  int value = -1;
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, received_payload);
+  if (error)
+    Serial.println(F("Failed to read payload, using default configuration"));
+
+  idx = doc["idx"] | -1;
+  value = doc["nvalue"] | -1;
+  Serial.print("idx: ");
+  Serial.print(idx);
+  Serial.print(" - value: ");
+  Serial.println(value);
+
+  if (idx == config.device_uid)
+  {
+    if (value >= 0)
+    {
+      setAction(value);
+    }
+  }
 
   // Note: Do not use the client in the callback to publish, subscribe or
   // unsubscribe as it may cause deadlocks when other things arrive while
@@ -203,7 +242,7 @@ void wifiConnect() {
     delay(1000);
   }
 
-  Serial.println("\WiFi connected.");
+  Serial.println("\nWiFi connected.");
   Serial.print("IP: ");
   Serial.println(WiFi.localIP().toString());
 }
@@ -247,6 +286,7 @@ void setupWebServer() {
   server.on("/saveconfig", HTTP_POST, []() {
     strcpy(config.wifi_ssid,     server.arg("wifi_ssid").c_str());
     strcpy(config.wifi_pwd,      server.arg("wifi_pwd").c_str());
+    strcpy(config.device_uid,    server.arg("mqtt_deviceid").c_str());
     strcpy(config.mqtt_server,   server.arg("mqtt_server").c_str());
     config.mqtt_port =           atoi(server.arg("mqtt_port").c_str());
     strcpy(config.mqtt_username, server.arg("mqtt_user").c_str());
@@ -274,8 +314,8 @@ void setupWebServer() {
 
 void setup() {
   Serial.begin(115200);
-  pinMode(PIN_ON, INPUT_PULLUP);
-  pinMode(PIN_OFF, INPUT_PULLUP);
+  pinMode(PIN_ONOFF, INPUT_PULLUP);
+  pinMode(PIN_MANUAL, INPUT_PULLUP);
   pinMode(PIN_LED_GREEN, OUTPUT);
   pinMode(PIN_LED_RED, OUTPUT);
   pinMode(PIN_MODE, INPUT_PULLDOWN_16);
