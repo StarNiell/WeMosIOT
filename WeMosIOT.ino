@@ -4,9 +4,11 @@
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <LittleFS.h>
+#include <PubSubClient.h>
 
 ESP8266WebServer server(80);
-//WiFiServer serverAP(8080);
+WiFiClient espClient;
+PubSubClient mqtt_client(espClient);
 
 const uint16_t PIN_ON          = 0;  //D3 (pullup)
 const uint16_t PIN_OFF         = 14; //D5
@@ -131,7 +133,7 @@ void GenerateIndexHtml(const Config &config) {
   buffer.replace("wifi_pwd_value", config.wifi_pwd);
   buffer.replace("mqtt_server_value", config.mqtt_server);
   buffer.replace("mqtt_port_value", mqtt_port_str);
-  buffer.replace("mqtt_username_value", config.mqtt_username);
+  buffer.replace("mqtt_user_value", config.mqtt_username);
   buffer.replace("mqtt_pwd_value", config.mqtt_pwd);
   buffer.replace("device_uid_value", config.device_uid);
   buffer.replace("topic_sub_value", config.topic_sub);
@@ -169,12 +171,73 @@ void setupAP() {
   setupWebServer();
 }
 
-void setupMqtt() {
+void mqttCallback(char *topic, byte *payload, unsigned int length) {
+  Serial.print("incoming: ");
+  Serial.println(topic);
+  Serial.print("Message:");
+    for (unsigned int i = 0; i < length; i++) {
+        Serial.print((char) payload[i]);
+    }
+    Serial.println();
+    Serial.println("-----------------------");
 
+
+  // Note: Do not use the client in the callback to publish, subscribe or
+  // unsubscribe as it may cause deadlocks when other things arrive while
+  // sending and receiving acknowledgments. Instead, change a global variable,
+  // or push to a queue and handle it in the loop after calling `client.loop()`.
 }
 
-void setupWebServer()
-{
+void wifiConnect() {
+  Serial.println("WiFi setup...");
+  Serial.print("WiFi ssid: ");
+  Serial.println(config.wifi_ssid);
+  Serial.print("WiFi pwd: ");
+  Serial.println(config.wifi_pwd);
+
+  WiFi.begin(config.wifi_ssid, config.wifi_pwd);
+
+  Serial.print("checking wifi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    Serial.print(".");
+    delay(1000);
+  }
+
+  Serial.println("\WiFi connected.");
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP().toString());
+}
+
+void setupMqtt() {
+
+  wifiConnect();
+
+  mqtt_client.setServer(config.mqtt_server, config.mqtt_port);
+  mqtt_client.setCallback(mqttCallback);
+}
+
+void mqttConnect() {
+  while(!mqtt_client.connected())
+  {
+    if (mqtt_client.connect(config.device_uid, config.mqtt_username, config.mqtt_pwd)) {
+        Serial.print("Connected to MQTT broker as Client: ");
+        Serial.println(config.device_uid);
+        mqtt_client.subscribe(config.topic_sub);
+        Serial.print("Subscribed: ");
+        Serial.println(config.topic_sub);
+        
+        // Publish message upon successful connection
+        //mqtt_client.publish(mqtt_topic, "Hi EMQX I'm ESP8266 ^^");
+    }
+    else
+    {
+      Serial.print(".");
+      delay(1000);
+    }
+  }
+}
+
+void setupWebServer() {
   server.serveStatic("/", LittleFS, "/", "no-cache, no-store, must-revalidate");
   
   server.onNotFound([](){ 
@@ -186,7 +249,7 @@ void setupWebServer()
     strcpy(config.wifi_pwd,      server.arg("wifi_pwd").c_str());
     strcpy(config.mqtt_server,   server.arg("mqtt_server").c_str());
     config.mqtt_port =           atoi(server.arg("mqtt_port").c_str());
-    strcpy(config.mqtt_username, server.arg("mqtt_username").c_str());
+    strcpy(config.mqtt_username, server.arg("mqtt_user").c_str());
     strcpy(config.mqtt_pwd,      server.arg("mqtt_pwd").c_str());
     strcpy(config.device_uid,    server.arg("device_uid").c_str());
     strcpy(config.topic_sub,     server.arg("topic_sub").c_str());
@@ -240,6 +303,8 @@ void setup() {
   Serial.print("config.wifi_pwd: ");    Serial.println(config.wifi_pwd);
   Serial.print("config.mqtt-server: "); Serial.println(config.mqtt_server);
   Serial.print("config.mqtt_port: ");   Serial.println(config.mqtt_port);
+  Serial.print("config.mqtt_username: "); Serial.println(config.mqtt_username);
+  Serial.print("config.mqtt_pwd: "); Serial.println(config.mqtt_pwd);
 
   if (iMode == 0)
     setupMqtt();
@@ -249,5 +314,14 @@ void setup() {
 
 void loop() {
   if (iMode == 1)
+  {
     server.handleClient();
+  }
+  else
+  {
+    if (!mqtt_client.connected()) {
+        mqttConnect();
+    }
+    mqtt_client.loop();
+  }
 }
