@@ -197,7 +197,7 @@ void setAction(int value)
     int str_len = payload.length() + 1;
     char payload_char[str_len];
     payload.toCharArray(payload_char, str_len);
-    mqtt_client.publish(config.topic_pub, payload_char);
+    mqtt_client.publish(config.topic_pub, payload_char, true);
   }
 }
 
