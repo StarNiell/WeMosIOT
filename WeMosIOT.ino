@@ -39,6 +39,8 @@ struct Config {
 const char *config_filename = "/store/config.json";  // <- SD library uses 8.3 filenames
 Config config; 
 
+String pub_payload_onoff = "{\"idx\": \"<idx>\", \"nvalue\": <nvalue> }";
+
 // Loads the configuration from a file
 void loadConfiguration(const char *filename, Config &config) {
   // Open file for reading
@@ -95,7 +97,6 @@ bool saveConfiguration(const char *filename, const Config &config) {
   // Set the values in the document
   doc["wifi-ssid"]      = config.wifi_ssid; 
   doc["wifi-pwd"]       = config.wifi_pwd;
-  doc["mqtt-deviceid"]  = config.device_uid;
   doc["mqtt-server"]    = config.mqtt_server;
   doc["mqtt-port"]      = config.mqtt_port;
   doc["mqtt-username"]  = config.mqtt_username;
@@ -132,7 +133,6 @@ void GenerateIndexHtml(const Config &config) {
 
   buffer.replace("wifi_ssid_value",     config.wifi_ssid);
   buffer.replace("wifi_pwd_value",      config.wifi_pwd);
-  buffer.replace("mqtt_deviceid_value", config.device_uid);
   buffer.replace("mqtt_server_value",   config.mqtt_server);
   buffer.replace("mqtt_port_value",     mqtt_port_str);
   buffer.replace("mqtt_user_value",     config.mqtt_username);
@@ -175,13 +175,29 @@ void setupAP() {
 
 void setAction(int value)
 {
+  String payload = pub_payload_onoff;
+  payload.replace("<idx>", config.device_uid);
+  char value_str[1];
+  itoa(value, value_str, 10);
+  payload.replace("<nvalue>", value_str);
+
   if (value > 0)
   {
     digitalWrite(PIN_ONOFF, HIGH);
+    Serial.println("Set Action to ON");
   }
   else
   {
     digitalWrite(PIN_ONOFF, LOW);
+    Serial.println("Set Action to OFF");
+  }
+
+  if (mqtt_client.connected())
+  {
+    int str_len = payload.length() + 1;
+    char payload_char[str_len];
+    payload.toCharArray(payload_char, str_len);
+    mqtt_client.publish(config.topic_pub, payload_char);
   }
 }
 
@@ -199,22 +215,23 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   Serial.println("-----------------------");
   */
 
-  int idx = 0;
+  char idx[16];
   int value = -1;
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, received_payload);
   if (error)
     Serial.println(F("Failed to read payload, using default configuration"));
 
-  idx = doc["idx"] | -1;
+  strlcpy(idx, doc["idx"] | "", sizeof(idx));
   value = doc["nvalue"] | -1;
   Serial.print("idx: ");
   Serial.print(idx);
   Serial.print(" - value: ");
   Serial.println(value);
 
-  if (idx == config.device_uid)
+  if (strcmp(idx, config.device_uid) == 0)
   {
+    Serial.println("idx == config.device_uid.... OK");
     if (value >= 0)
     {
       setAction(value);
@@ -291,7 +308,6 @@ void setupWebServer() {
     config.mqtt_port =           atoi(server.arg("mqtt_port").c_str());
     strcpy(config.mqtt_username, server.arg("mqtt_user").c_str());
     strcpy(config.mqtt_pwd,      server.arg("mqtt_pwd").c_str());
-    strcpy(config.device_uid,    server.arg("device_uid").c_str());
     strcpy(config.topic_sub,     server.arg("topic_sub").c_str());
     strcpy(config.topic_pub,     server.arg("topic_pub").c_str());
 
@@ -341,6 +357,7 @@ void setup() {
   
   Serial.print("config.wifi_ssid: ");   Serial.println(config.wifi_ssid);
   Serial.print("config.wifi_pwd: ");    Serial.println(config.wifi_pwd);
+  Serial.print("config.device_uid: "); Serial.println(config.device_uid);
   Serial.print("config.mqtt-server: "); Serial.println(config.mqtt_server);
   Serial.print("config.mqtt_port: ");   Serial.println(config.mqtt_port);
   Serial.print("config.mqtt_username: "); Serial.println(config.mqtt_username);
