@@ -10,7 +10,7 @@ ESP8266WebServer server(80);
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
 
-const uint16_t PIN_ONOFF       = 0;  //D3 (pullup)
+const uint16_t PIN_ONOFF       = 4;  //D2
 const uint16_t PIN_MANUAL      = 14; //D5
 const uint16_t PIN_LED_GREEN   = 16; //D0
 const uint16_t PIN_LED_RED     = 5;  //D1
@@ -39,7 +39,7 @@ struct Config {
 const char *config_filename = "/store/config.json";  // <- SD library uses 8.3 filenames
 Config config; 
 
-String pub_payload_onoff = "{\"idx\": \"<idx>\", \"nvalue\": <nvalue> }";
+String pub_payload = "{\"device_id\": \"<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"status\": \"<status>\" }";
 
 // Loads the configuration from a file
 void loadConfiguration(const char *filename, Config &config) {
@@ -173,14 +173,37 @@ void setupAP() {
   setupWebServer();
 }
 
+String getPayload(char *device_id, char *type, int value, char *unit)
+{
+  String payload = pub_payload;
+  char timestamp[] = "0000-00-00T00:00:00Z";
+  payload.replace("<device_id>", device_id);
+  payload.replace("<timestamp>", timestamp);
+  payload.replace("<type>", type);
+  
+  char value_str[8];
+  itoa(value, value_str, 10);
+  payload.replace("<value>", value_str);
+
+  payload.replace("<unit>", unit);
+  payload.replace("<status>", "ok");
+  
+  return payload;
+}
+
+
 void setAction(int value)
 {
-  String payload = pub_payload_onoff;
-  payload.replace("<idx>", config.device_uid);
-  char value_str[1];
+  char type[] = "switch";
+  char unit[] = "";
+  String payload = getPayload(config.device_uid, type, value, unit);
+  /*
+  String payload = pub_payload;
+  payload.replace("<device_id>", config.device_uid);
+  char value_str[8];
   itoa(value, value_str, 10);
-  payload.replace("<nvalue>", value_str);
-
+  payload.replace("<value>", value_str);
+  */
   if (value > 0)
   {
     digitalWrite(PIN_ONOFF, HIGH);
@@ -215,23 +238,23 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   Serial.println("-----------------------");
   */
 
-  char idx[16];
+  char device_id[16];
   int value = -1;
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, received_payload);
   if (error)
     Serial.println(F("Failed to read payload, using default configuration"));
 
-  strlcpy(idx, doc["idx"] | "", sizeof(idx));
-  value = doc["nvalue"] | -1;
-  Serial.print("idx: ");
-  Serial.print(idx);
+  strlcpy(device_id, doc["device_id"] | "", sizeof(device_id));
+  value = doc["value"] | -1;
+  Serial.print("device_id: ");
+  Serial.print(device_id);
   Serial.print(" - value: ");
   Serial.println(value);
 
-  if (strcmp(idx, config.device_uid) == 0)
+  if (strcmp(device_id, config.device_uid) == 0)
   {
-    Serial.println("idx == config.device_uid.... OK");
+    Serial.println("device_id == config.device_uid.... OK");
     if (value >= 0)
     {
       setAction(value);
@@ -330,7 +353,7 @@ void setupWebServer() {
 
 void setup() {
   Serial.begin(115200);
-  pinMode(PIN_ONOFF, INPUT_PULLUP);
+  pinMode(PIN_ONOFF, OUTPUT);
   pinMode(PIN_MANUAL, INPUT_PULLUP);
   pinMode(PIN_LED_GREEN, OUTPUT);
   pinMode(PIN_LED_RED, OUTPUT);
