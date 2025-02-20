@@ -36,10 +36,18 @@ struct Config {
   char topic_pub[64];
 };
 
+const char *typeSwitch = "switch";
+const char *typeSensor = "sensor";
+const char *typeInfrar = "infrar";
+const char *typeButton = "button";
+const char *statusOK = "ok";
+const char *statusKO = "ko";
+
 const char *config_filename = "/store/config.json";  // <- SD library uses 8.3 filenames
 Config config; 
 
-String pub_payload = "{\"device_id\": \"<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"status\": \"<status>\" }";
+String pub_payload = "{\"device_id\": \"<type>-<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"status\": \"<status>\" }";
+String pub_topic = "<topic>/<type>-<device_id>";
 
 // Loads the configuration from a file
 void loadConfiguration(const char *filename, Config &config) {
@@ -173,10 +181,11 @@ void setupAP() {
   setupWebServer();
 }
 
-String getPayload(char *device_id, char *type, int value, char *unit)
+char * getPayload(char *device_id, const char *type, int value, const char *unit)
 {
   String payload = pub_payload;
   char timestamp[] = "0000-00-00T00:00:00Z";
+
   payload.replace("<device_id>", device_id);
   payload.replace("<timestamp>", timestamp);
   payload.replace("<type>", type);
@@ -187,23 +196,38 @@ String getPayload(char *device_id, char *type, int value, char *unit)
 
   payload.replace("<unit>", unit);
   payload.replace("<status>", "ok");
-  
-  return payload;
+
+  int str_len = payload.length() + 1;
+  static char payload_char[256];
+  payload.toCharArray(payload_char, str_len);
+
+  return payload_char;
 }
 
+char * getPubTopic(char *device_id, const char *type) {
+  String pubTopic = pub_topic;
+  pubTopic.replace("<topic>", config.topic_pub);
+  pubTopic.replace("<type>", type);
+  pubTopic.replace("<device_id>", device_id);
 
-void setAction(int value)
+  int str_len = pubTopic.length() + 1;
+  static char pubTopic_char[128];
+  pubTopic.toCharArray(pubTopic_char, str_len);
+
+  Serial.print("pubTopic.toCharArray");
+  Serial.println(pubTopic_char);
+
+  return pubTopic_char;
+}
+
+void setActionOnOff(int value)
 {
-  char type[] = "switch";
-  char unit[] = "";
-  String payload = getPayload(config.device_uid, type, value, unit);
-  /*
-  String payload = pub_payload;
-  payload.replace("<device_id>", config.device_uid);
-  char value_str[8];
-  itoa(value, value_str, 10);
-  payload.replace("<value>", value_str);
-  */
+  char *payload = getPayload(config.device_uid, typeSwitch, value, statusOK);
+  char *pubTopic = getPubTopic(config.device_uid, typeSwitch);
+
+  Serial.print("pubTopic: ");
+  Serial.println(pubTopic);
+
   if (value > 0)
   {
     digitalWrite(PIN_ONOFF, HIGH);
@@ -217,10 +241,59 @@ void setAction(int value)
 
   if (mqtt_client.connected())
   {
-    int str_len = payload.length() + 1;
-    char payload_char[str_len];
-    payload.toCharArray(payload_char, str_len);
-    mqtt_client.publish(config.topic_pub, payload_char, true);
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+}
+
+void setActionInfrar(int value)
+{
+  char *payload = getPayload(config.device_uid, typeInfrar, value, statusOK);
+  char *pubTopic = getPubTopic(config.device_uid, typeInfrar);
+
+  //Send feedback
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+
+  //TODO: Not yet implemented
+  delay(1000);
+
+  //Send feedback
+  payload = getPayload(config.device_uid, typeInfrar, 0, statusOK);
+
+  //Send feedback
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+}
+
+void setActionButton(int value)
+{
+  char *payload = getPayload(config.device_uid, typeButton, value, statusOK);
+  char *pubTopic = getPubTopic(config.device_uid, typeButton);
+
+  digitalWrite(PIN_ONOFF, HIGH);
+  Serial.println("Set setActionButton to ON");
+
+  //Send feedback
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+
+  delay(1000);
+
+  payload = getPayload(config.device_uid, typeButton, 0, statusOK);
+
+  digitalWrite(PIN_ONOFF, LOW);
+  Serial.println("Set setActionButton to OFF");
+
+  //Send feedback
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
   }
 }
 
@@ -239,6 +312,7 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   */
 
   char device_id[16];
+  char idx[16];
   int value = -1;
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, received_payload);
@@ -252,12 +326,27 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   Serial.print(" - value: ");
   Serial.println(value);
 
-  if (strcmp(device_id, config.device_uid) == 0)
+  //find device_id
+  char * idxfind = strstr(device_id, config.device_uid);
+  
+  if (idxfind)
   {
     Serial.println("device_id == config.device_uid.... OK");
-    if (value >= 0)
+    //find type
+    if (strstr(device_id, typeSwitch) && value >= 0)
     {
-      setAction(value);
+      Serial.println("Type is: switch");
+      setActionOnOff(value);
+    }
+    else if (strstr(device_id, typeInfrar) && value >= 0)
+    {
+      Serial.println("Type is: infrar");
+      setActionInfrar(value);
+    }
+    else if (strstr(device_id, typeButton) && value >= 0)
+    {
+      Serial.println("Type is: button");
+      setActionButton(value);
     }
   }
 
