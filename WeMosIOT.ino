@@ -46,7 +46,7 @@ const char *statusKO = "ko";
 const char *config_filename = "/store/config.json";  // <- SD library uses 8.3 filenames
 Config config; 
 
-String pub_payload = "{\"device_id\": \"<type>-<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"status\": \"<status>\" }";
+String pub_payload = "{\"device_id\": \"<type>-<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"subscription\": \"<subscription>\" , \"status\": \"<status>\" }";
 String pub_topic = "<topic>/<type>-<device_id>";
 
 // Loads the configuration from a file
@@ -195,6 +195,7 @@ char * getPayload(char *device_id, const char *type, int value, const char *unit
   payload.replace("<value>", value_str);
 
   payload.replace("<unit>", unit);
+  payload.replace("<subscription>", config.topic_sub);
   payload.replace("<status>", "ok");
 
   int str_len = payload.length() + 1;
@@ -222,7 +223,7 @@ char * getPubTopic(char *device_id, const char *type) {
 
 void setActionOnOff(int value)
 {
-  char *payload = getPayload(config.device_uid, typeSwitch, value, statusOK);
+  char *payload = getPayload(config.device_uid, typeSwitch, value, "state");
   char *pubTopic = getPubTopic(config.device_uid, typeSwitch);
 
   Serial.print("pubTopic: ");
@@ -247,7 +248,7 @@ void setActionOnOff(int value)
 
 void setActionInfrar(int value)
 {
-  char *payload = getPayload(config.device_uid, typeInfrar, value, statusOK);
+  char *payload = getPayload(config.device_uid, typeInfrar, value, "");
   char *pubTopic = getPubTopic(config.device_uid, typeInfrar);
 
   //Send feedback
@@ -260,7 +261,7 @@ void setActionInfrar(int value)
   delay(1000);
 
   //Send feedback
-  payload = getPayload(config.device_uid, typeInfrar, 0, statusOK);
+  payload = getPayload(config.device_uid, typeInfrar, 0, "");
 
   //Send feedback
   if (mqtt_client.connected())
@@ -271,7 +272,7 @@ void setActionInfrar(int value)
 
 void setActionButton(int value)
 {
-  char *payload = getPayload(config.device_uid, typeButton, value, statusOK);
+  char *payload = getPayload(config.device_uid, typeButton, value, "state");
   char *pubTopic = getPubTopic(config.device_uid, typeButton);
 
   digitalWrite(PIN_ONOFF, HIGH);
@@ -285,7 +286,7 @@ void setActionButton(int value)
 
   delay(1000);
 
-  payload = getPayload(config.device_uid, typeButton, 0, statusOK);
+  payload = getPayload(config.device_uid, typeButton, 0, "state");
 
   digitalWrite(PIN_ONOFF, LOW);
   Serial.println("Set setActionButton to OFF");
