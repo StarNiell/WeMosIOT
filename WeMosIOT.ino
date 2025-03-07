@@ -49,6 +49,10 @@ Config config;
 String pub_payload = "{\"device_id\": \"<type>-<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"subscription\": \"<subscription>\" , \"status\": \"<status>\" }";
 String pub_topic = "<topic>/<type>-<device_id>";
 
+unsigned long sensorInterval = 60; //Seconds between 
+unsigned long sensorStartTime = millis();
+unsigned long sensorElapsedTime = 0;
+
 // Loads the configuration from a file
 void loadConfiguration(const char *filename, Config &config) {
   // Open file for reading
@@ -181,7 +185,7 @@ void setupAP() {
   setupWebServer();
 }
 
-char * getPayload(char *device_id, const char *type, int value, const char *unit)
+char * getPayload(char *device_id, const char *type, float value, const char *unit, int decimals)
 {
   String payload = pub_payload;
   char timestamp[] = "0000-00-00T00:00:00Z";
@@ -190,8 +194,10 @@ char * getPayload(char *device_id, const char *type, int value, const char *unit
   payload.replace("<timestamp>", timestamp);
   payload.replace("<type>", type);
   
-  char value_str[8];
-  itoa(value, value_str, 10);
+  char value_str[10];
+  //itoa(value, value_str, 10);
+  dtostrf(value, 6, decimals, value_str);
+
   payload.replace("<value>", value_str);
 
   payload.replace("<unit>", unit);
@@ -221,9 +227,14 @@ char * getPubTopic(char *device_id, const char *type) {
   return pubTopic_char;
 }
 
+float getSensorValue() 
+{
+    return (random(0, 600) / 10); 
+}
+
 void setActionOnOff(int value)
 {
-  char *payload = getPayload(config.device_uid, typeSwitch, value, "state");
+  char *payload = getPayload(config.device_uid, typeSwitch, (float)value, "state", 0);
   char *pubTopic = getPubTopic(config.device_uid, typeSwitch);
 
   Serial.print("pubTopic: ");
@@ -246,9 +257,10 @@ void setActionOnOff(int value)
   }
 }
 
-void setActionInfrar(int value)
+void setActionInfrar()
 {
-  char *payload = getPayload(config.device_uid, typeInfrar, value, "");
+
+  char *payload = getPayload(config.device_uid, typeInfrar, 1.0f, "state", 0);
   char *pubTopic = getPubTopic(config.device_uid, typeInfrar);
 
   //Send feedback
@@ -261,7 +273,7 @@ void setActionInfrar(int value)
   delay(1000);
 
   //Send feedback
-  payload = getPayload(config.device_uid, typeInfrar, 0, "");
+  payload = getPayload(config.device_uid, typeInfrar, 0.0f, "state", 0);
 
   //Send feedback
   if (mqtt_client.connected())
@@ -270,9 +282,30 @@ void setActionInfrar(int value)
   }
 }
 
-void setActionButton(int value)
+void setActionSensor(int value)
 {
-  char *payload = getPayload(config.device_uid, typeButton, value, "state");
+
+  if (value > 1)
+  {
+    sensorInterval = value;
+  }
+
+  float sensorValue = getSensorValue(); 
+
+  char *payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1);
+  char *pubTopic = getPubTopic(config.device_uid, typeSensor);
+  
+  //Send feedback
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+
+}
+
+void setActionButton()
+{
+  char *payload = getPayload(config.device_uid, typeButton, 1.0f, "state", 0);
   char *pubTopic = getPubTopic(config.device_uid, typeButton);
 
   digitalWrite(PIN_ONOFF, HIGH);
@@ -286,7 +319,7 @@ void setActionButton(int value)
 
   delay(1000);
 
-  payload = getPayload(config.device_uid, typeButton, 0, "state");
+  payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0);
 
   digitalWrite(PIN_ONOFF, LOW);
   Serial.println("Set setActionButton to OFF");
@@ -296,6 +329,42 @@ void setActionButton(int value)
   {
     mqtt_client.publish(pubTopic, payload, true);
   }
+}
+
+void sendInitialStatusRetained()
+{
+  char *payload = "";
+  char *pubTopic = "";
+
+  Serial.println("sendInitialStatusRetained()");
+
+  //Switch
+  payload = getPayload(config.device_uid, typeSwitch, 0.0f, "state", 0);
+  pubTopic = getPubTopic(config.device_uid, typeSwitch);
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+
+  //Button
+  payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0);
+  pubTopic = getPubTopic(config.device_uid, typeButton);
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+
+  //Sensor
+  float sensorValue = getSensorValue(); 
+  payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 0);
+  pubTopic = getPubTopic(config.device_uid, typeSensor);
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+    Serial.print("Sensor payload: ");
+    Serial.println(payload);
+  }
+
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
@@ -333,21 +402,30 @@ void mqttCallback(char *topic, byte *payload, unsigned int length) {
   if (idxfind)
   {
     Serial.println("device_id == config.device_uid.... OK");
-    //find type
+    
+    //Switch
     if (strstr(device_id, typeSwitch) && value >= 0)
     {
       Serial.println("Type is: switch");
       setActionOnOff(value);
     }
-    else if (strstr(device_id, typeInfrar) && value >= 0)
+    //Infrared
+    else if (strstr(device_id, typeInfrar))
     {
       Serial.println("Type is: infrar");
-      setActionInfrar(value);
+      setActionInfrar();
     }
-    else if (strstr(device_id, typeButton) && value >= 0)
+    //Button
+    else if (strstr(device_id, typeButton))
     {
       Serial.println("Type is: button");
-      setActionButton(value);
+      setActionButton();
+    }
+    //Sensor
+    else if (strstr(device_id, typeSensor))
+    {
+      Serial.println("Type is: sensor");
+      setActionSensor(value);
     }
   }
 
@@ -396,7 +474,7 @@ void mqttConnect() {
         Serial.println(config.topic_sub);
         
         // Publish message upon successful connection
-        //mqtt_client.publish(mqtt_topic, "Hi EMQX I'm ESP8266 ^^");
+        sendInitialStatusRetained();
     }
     else
     {
@@ -493,5 +571,11 @@ void loop() {
         mqttConnect();
     }
     mqtt_client.loop();
+    if ((millis() - sensorStartTime) >= (sensorInterval * 1000))
+    {
+      sensorStartTime = millis();
+      setActionSensor(0);
+    }
+
   }
 }
