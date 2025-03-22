@@ -10,12 +10,18 @@ ESP8266WebServer server(80);
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
 
-const uint16_t PIN_ONOFF       = 4;  //D2
-const uint16_t PIN_CONTACT     = 0;  //D3
-const uint16_t PIN_MANUAL      = 14; //D5
-const uint16_t PIN_LED_GREEN   = 16; //D0
-const uint16_t PIN_LED_RED     = 5;  //D1
-const uint16_t PIN_MODE        = 15; //D8 (Pulldown)
+const bool SENSOR_ENABLED      = false;
+const bool SWITCH_ENABLED      = true;
+const bool BUTTON_ENABLED      = true;
+const bool CONTACT_ENABLED     = false;
+const bool INFRARED_ENABLED    = false;
+
+const uint16_t PIN_ONOFF      = 4;  //D2
+const uint16_t PIN_CONTACT    = 0;  //D3
+const uint16_t PIN_MANUAL     = 14; //D5
+const uint16_t PIN_LED_RED    = 16; //D0
+const uint16_t PIN_LED_GREEN  = 5;  //D1
+const uint16_t PIN_MODE       = 15; //D8 (Pulldown)
 
 bool lastConnectionStatus = false;
 String sid = "StarNiell WiFi";
@@ -251,11 +257,13 @@ void setActionOnOff(int value)
   if (value > 0)
   {
     digitalWrite(PIN_ONOFF, HIGH);
+    digitalWrite(PIN_LED_RED, HIGH);
     Serial.println("Set Action to ON");
   }
   else
   {
     digitalWrite(PIN_ONOFF, LOW);
+    digitalWrite(PIN_LED_RED, LOW);
     Serial.println("Set Action to OFF");
   }
 
@@ -331,6 +339,7 @@ void setActionButton()
   char *pubTopic = getPubTopic(config.device_uid, typeButton);
 
   digitalWrite(PIN_ONOFF, HIGH);
+  digitalWrite(PIN_LED_RED, HIGH);
   Serial.println("Set setActionButton to ON");
 
   //Send feedback
@@ -344,6 +353,7 @@ void setActionButton()
   payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0);
 
   digitalWrite(PIN_ONOFF, LOW);
+  digitalWrite(PIN_LED_RED, LOW);
   Serial.println("Set setActionButton to OFF");
 
   //Send feedback
@@ -361,44 +371,61 @@ void sendInitialStatusRetained()
   Serial.println("sendInitialStatusRetained()");
 
   //Switch
-  payload = getPayload(config.device_uid, typeSwitch, 0.0f, "state", 0);
-  pubTopic = getPubTopic(config.device_uid, typeSwitch);
-  if (mqtt_client.connected())
+  if (SWITCH_ENABLED)
   {
-    mqtt_client.publish(pubTopic, payload, true);
+    payload = getPayload(config.device_uid, typeSwitch, 0.0f, "state", 0);
+    pubTopic = getPubTopic(config.device_uid, typeSwitch);
+    if (mqtt_client.connected())
+    {
+      mqtt_client.publish(pubTopic, payload, true);
+    }
   }
 
   //Button
-  payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0);
-  pubTopic = getPubTopic(config.device_uid, typeButton);
-  if (mqtt_client.connected())
+  if (BUTTON_ENABLED)
   {
-    mqtt_client.publish(pubTopic, payload, true);
+    payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0);
+    pubTopic = getPubTopic(config.device_uid, typeButton);
+    if (mqtt_client.connected())
+    {
+      mqtt_client.publish(pubTopic, payload, true);
+    }
   }
 
   //Sensor
-  float sensorValue = getSensorValue(); 
-  payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1);
-  pubTopic = getPubTopic(config.device_uid, typeSensor);
-  if (mqtt_client.connected())
+  if (SENSOR_ENABLED)
   {
-    mqtt_client.publish(pubTopic, payload, true);
-    Serial.print("Sensor payload: ");
-    Serial.println(payload);
+    float sensorValue = getSensorValue(); 
+    payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1);
+    pubTopic = getPubTopic(config.device_uid, typeSensor);
+    if (mqtt_client.connected())
+    {
+      mqtt_client.publish(pubTopic, payload, true);
+      Serial.print("Sensor payload: ");
+      Serial.println(payload);
+    }
   }
 
   //Contact
-  int contactValue = getContactValue()==1 ? 0 : 1; 
-  lastContactState = (getContactValue() == HIGH);
-  payload = getPayload(config.device_uid, typeContact, float(contactValue), "state", 0);
-  pubTopic = getPubTopic(config.device_uid, typeContact);
-  if (mqtt_client.connected())
+  if (CONTACT_ENABLED)
   {
-    mqtt_client.publish(pubTopic, payload, true);
-    Serial.print("Contact payload: ");
-    Serial.println(payload);
+    int contactValue = getContactValue()==1 ? 0 : 1; 
+    lastContactState = (getContactValue() == HIGH);
+    payload = getPayload(config.device_uid, typeContact, float(contactValue), "state", 0);
+    pubTopic = getPubTopic(config.device_uid, typeContact);
+    if (mqtt_client.connected())
+    {
+      mqtt_client.publish(pubTopic, payload, true);
+      Serial.print("Contact payload: ");
+      Serial.println(payload);
+    }
   }
 
+  //Infrared
+  if (INFRARED_ENABLED)
+  {
+    //TODO: Feature missing
+  }
 }
 
 void mqttCallback(char *topic, byte *payload, unsigned int length) {
@@ -551,6 +578,7 @@ void setupWebServer() {
     }
   });
   server.begin();
+  digitalWrite(PIN_LED_RED, HIGH);
 }
 
 void setup() {
@@ -562,7 +590,7 @@ void setup() {
   pinMode(PIN_MODE, INPUT_PULLDOWN_16);
   pinMode(PIN_CONTACT, INPUT_PULLUP);
 
-  digitalWrite(PIN_LED_GREEN, LOW);
+  digitalWrite(PIN_LED_GREEN, HIGH);
   digitalWrite(PIN_LED_RED, HIGH);
 
   Serial.println("ESP starts");
@@ -570,6 +598,9 @@ void setup() {
   LittleFS.begin();
 
   delay(2000);
+
+  digitalWrite(PIN_LED_GREEN, LOW);
+  digitalWrite(PIN_LED_RED, LOW);
 
   if (digitalRead(PIN_MODE) == HIGH)
   {
@@ -605,20 +636,33 @@ void loop() {
   else
   {
     if (!mqtt_client.connected()) {
-        mqttConnect();
+      digitalWrite(PIN_LED_GREEN, LOW);
+      mqttConnect();
+    }
+    else
+    {
+      digitalWrite(PIN_LED_GREEN, HIGH);
     }
     mqtt_client.loop();
-    if ((millis() - sensorStartTime) >= (sensorInterval * 1000))
+
+    if (SENSOR_ENABLED)
     {
-      sensorStartTime = millis();
-      setActionSensor(0);
+      if ((millis() - sensorStartTime) >= (sensorInterval * 1000))
+      {
+        sensorStartTime = millis();
+        setActionSensor(0);
+      }
     }
-    int currentContactState = getContactValue();
-    if ((currentContactState == HIGH) != lastContactState)
+
+    if (CONTACT_ENABLED)
     {
-      setActionContact(currentContactState == HIGH ? 0 : 1);
+      int currentContactState = getContactValue();
+      if ((currentContactState == HIGH) != lastContactState)
+      {
+        setActionContact(currentContactState == HIGH ? 0 : 1);
+      }
+      lastContactState = (currentContactState == HIGH);
     }
-    lastContactState = (currentContactState == HIGH);
 
   }
 }
