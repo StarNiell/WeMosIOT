@@ -246,14 +246,23 @@ char * getPubTopic(char *device_id, const char *type) {
 
 float getSensorValue() 
 {
-    return (random(0, 600) / 10); 
-    //return dht.getTemperature();
+    //return (random(0, 600) / 10); 
+    float v = dht.getTemperature();
+    if (isnan(v)) {
+      v = 0.0f;
+    }
+    return v;
 }
 
 float getSensorValue2() 
 {
-    return (random(0, 600) / 10); 
-    //return dht.getHumidity();
+    //return (random(0, 600) / 10); 
+    float v = dht.getHumidity();
+    if (isnan(v)) {
+      v = 0.0f;
+    }
+    return v;
+
 }
 
 int getContactValue()
@@ -606,6 +615,9 @@ void setup() {
   pinMode(PIN_LED_RED, OUTPUT);
   pinMode(PIN_MODE, INPUT_PULLDOWN_16);
   pinMode(PIN_CONTACT, INPUT_PULLUP);
+
+  dht.setup(PIN_SENSOR, DHTesp::DHT11);
+
 
   digitalWrite(PIN_LED_GREEN, HIGH);
   digitalWrite(PIN_LED_RED, HIGH);
