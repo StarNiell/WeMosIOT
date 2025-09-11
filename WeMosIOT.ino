@@ -5,19 +5,22 @@
 #include <ESP8266mDNS.h>
 #include <LittleFS.h>
 #include <PubSubClient.h>
-
+#include "DHTesp.h"
+ 
 ESP8266WebServer server(80);
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
+DHTesp dht;
 
-const bool SENSOR_ENABLED      = false;
-const bool SWITCH_ENABLED      = true;
-const bool BUTTON_ENABLED      = true;
+const bool SENSOR_ENABLED      = true;
+const bool SWITCH_ENABLED      = false;
+const bool BUTTON_ENABLED      = false;
 const bool CONTACT_ENABLED     = false;
 const bool INFRARED_ENABLED    = false;
 
 const uint16_t PIN_ONOFF      = 4;  //D2
 const uint16_t PIN_CONTACT    = 0;  //D3
+const uint16_t PIN_SENSOR     = 2;  //D4
 const uint16_t PIN_MANUAL     = 14; //D5
 const uint16_t PIN_LED_RED    = 16; //D0
 const uint16_t PIN_LED_GREEN  = 5;  //D1
@@ -55,7 +58,7 @@ const char *statusKO = "ko";
 const char *config_filename = "/store/config.json";  // <- SD library uses 8.3 filenames
 Config config; 
 
-String pub_payload = "{\"device_id\": \"<type>-<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"subscription\": \"<subscription>\" , \"status\": \"<status>\" }";
+String pub_payload = "{\"device_id\": \"<type>-<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"value2\": <value2>, \"unit2\": \"<unit2>\", \"subscription\": \"<subscription>\" , \"status\": \"<status>\" }";
 String pub_topic = "<topic>/<type>-<device_id>";
 
 unsigned long sensorInterval = 60; //Seconds between 
@@ -194,7 +197,7 @@ void setupAP() {
   setupWebServer();
 }
 
-char * getPayload(char *device_id, const char *type, float value, const char *unit, int decimals)
+char * getPayload(char *device_id, const char *type, float value, const char *unit, int decimals, float value2, const char *unit2, int decimals2)
 {
   String payload = pub_payload;
   char timestamp[] = "0000-00-00T00:00:00Z";
@@ -202,14 +205,19 @@ char * getPayload(char *device_id, const char *type, float value, const char *un
   payload.replace("<device_id>", device_id);
   payload.replace("<timestamp>", timestamp);
   payload.replace("<type>", type);
-  
+
+  // value  
   char value_str[10];
-  //itoa(value, value_str, 10);
   dtostrf(value, 6, decimals, value_str);
-
   payload.replace("<value>", value_str);
-
   payload.replace("<unit>", unit);
+
+  // value2
+  char value2_str[10];
+  dtostrf(value2, 6, decimals2, value2_str);
+  payload.replace("<value2>", value2_str);
+  payload.replace("<unit2>", unit2);
+
   payload.replace("<subscription>", config.topic_sub);
   payload.replace("<status>", "ok");
 
@@ -239,6 +247,13 @@ char * getPubTopic(char *device_id, const char *type) {
 float getSensorValue() 
 {
     return (random(0, 600) / 10); 
+    //return dht.getTemperature();
+}
+
+float getSensorValue2() 
+{
+    return (random(0, 600) / 10); 
+    //return dht.getHumidity();
 }
 
 int getContactValue()
@@ -248,7 +263,7 @@ int getContactValue()
 
 void setActionOnOff(int value)
 {
-  char *payload = getPayload(config.device_uid, typeSwitch, (float)value, "state", 0);
+  char *payload = getPayload(config.device_uid, typeSwitch, (float)value, "state", 0, 0.0f, "", 0);
   char *pubTopic = getPubTopic(config.device_uid, typeSwitch);
 
   Serial.print("pubTopic: ");
@@ -276,7 +291,7 @@ void setActionOnOff(int value)
 void setActionInfrar()
 {
 
-  char *payload = getPayload(config.device_uid, typeInfrar, 1.0f, "state", 0);
+  char *payload = getPayload(config.device_uid, typeInfrar, 1.0f, "state", 0, 0.0f, "", 0);
   char *pubTopic = getPubTopic(config.device_uid, typeInfrar);
 
   //Send feedback
@@ -289,7 +304,7 @@ void setActionInfrar()
   delay(1000);
 
   //Send feedback
-  payload = getPayload(config.device_uid, typeInfrar, 0.0f, "state", 0);
+  payload = getPayload(config.device_uid, typeInfrar, 0.0f, "state", 0, 0.0f, "", 0);
 
   //Send feedback
   if (mqtt_client.connected())
@@ -307,8 +322,9 @@ void setActionSensor(int value)
   }
 
   float sensorValue = getSensorValue(); 
+  float sensorValue2 = getSensorValue2(); 
 
-  char *payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1);
+  char *payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1, sensorValue2, "%", 1);
   char *pubTopic = getPubTopic(config.device_uid, typeSensor);
   
   //Send feedback
@@ -322,7 +338,7 @@ void setActionSensor(int value)
 void setActionContact(int value)
 {
 
-  char *payload = getPayload(config.device_uid, typeContact, float(value), "state", 0);
+  char *payload = getPayload(config.device_uid, typeContact, float(value), "state", 0, 0.0f, "", 0);
   char *pubTopic = getPubTopic(config.device_uid, typeContact);
   
   //Send feedback
@@ -335,7 +351,7 @@ void setActionContact(int value)
 
 void setActionButton()
 {
-  char *payload = getPayload(config.device_uid, typeButton, 1.0f, "state", 0);
+  char *payload = getPayload(config.device_uid, typeButton, 1.0f, "state", 0, 0.0f, "", 0);
   char *pubTopic = getPubTopic(config.device_uid, typeButton);
 
   digitalWrite(PIN_ONOFF, HIGH);
@@ -350,7 +366,7 @@ void setActionButton()
 
   delay(1000);
 
-  payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0);
+  payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0, 0.0f, "", 0);
 
   digitalWrite(PIN_ONOFF, LOW);
   digitalWrite(PIN_LED_RED, LOW);
@@ -373,7 +389,7 @@ void sendInitialStatusRetained()
   //Switch
   if (SWITCH_ENABLED)
   {
-    payload = getPayload(config.device_uid, typeSwitch, 0.0f, "state", 0);
+    payload = getPayload(config.device_uid, typeSwitch, 0.0f, "state", 0, 0.0f, "", 0);
     pubTopic = getPubTopic(config.device_uid, typeSwitch);
     if (mqtt_client.connected())
     {
@@ -384,7 +400,7 @@ void sendInitialStatusRetained()
   //Button
   if (BUTTON_ENABLED)
   {
-    payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0);
+    payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0, 0.0f, "", 0);
     pubTopic = getPubTopic(config.device_uid, typeButton);
     if (mqtt_client.connected())
     {
@@ -396,7 +412,8 @@ void sendInitialStatusRetained()
   if (SENSOR_ENABLED)
   {
     float sensorValue = getSensorValue(); 
-    payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1);
+    float sensorValue2 = getSensorValue2(); 
+    payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1, sensorValue2, "%", 1);
     pubTopic = getPubTopic(config.device_uid, typeSensor);
     if (mqtt_client.connected())
     {
@@ -411,7 +428,7 @@ void sendInitialStatusRetained()
   {
     int contactValue = getContactValue()==1 ? 0 : 1; 
     lastContactState = (getContactValue() == HIGH);
-    payload = getPayload(config.device_uid, typeContact, float(contactValue), "state", 0);
+    payload = getPayload(config.device_uid, typeContact, float(contactValue), "state", 0, 0.0f, "", 0);
     pubTopic = getPubTopic(config.device_uid, typeContact);
     if (mqtt_client.connected())
     {
