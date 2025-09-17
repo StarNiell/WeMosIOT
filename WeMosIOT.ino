@@ -6,16 +6,21 @@
 #include <LittleFS.h>
 #include <PubSubClient.h>
 #include "DHTesp.h"
- 
+#include <NTP.h>
+#include <WiFiUdp.h>
+
 ESP8266WebServer server(80);
 WiFiClient espClient;
 PubSubClient mqtt_client(espClient);
 DHTesp dht;
+WiFiUDP wifiUdp;
+NTP ntp(wifiUdp);
 
 const bool SENSOR_ENABLED      = true;
-const bool SWITCH_ENABLED      = false;
-const bool BUTTON_ENABLED      = false;
-const bool CONTACT_ENABLED     = false;
+const bool GET_FAKE_SENSOR     = true;
+const bool SWITCH_ENABLED      = true;
+const bool BUTTON_ENABLED      = true;
+const bool CONTACT_ENABLED     = true;
 const bool INFRARED_ENABLED    = false;
 
 const uint16_t PIN_ONOFF      = 4;  //D2
@@ -201,9 +206,16 @@ char * getPayload(char *device_id, const char *type, float value, const char *un
 {
   String payload = pub_payload;
   char timestamp[] = "0000-00-00T00:00:00Z";
+  //char * timestamp;
+
+  ntp.update();
+
+  String strTimeStamp = ntp.formattedTime("%Y-%m-%dT%H:%M:%SZ");
+  Serial.print("strTimeStamp: ");
+  Serial.println(strTimeStamp);
 
   payload.replace("<device_id>", device_id);
-  payload.replace("<timestamp>", timestamp);
+  payload.replace("<timestamp>", strTimeStamp);
   payload.replace("<type>", type);
 
   // value  
@@ -246,22 +258,34 @@ char * getPubTopic(char *device_id, const char *type) {
 
 float getSensorValue() 
 {
-    //return (random(0, 600) / 10); 
+  if (GET_FAKE_SENSOR)
+  {
+    return (random(0, 600) / 10); 
+  }
+  else
+  {
     float v = dht.getTemperature();
     if (isnan(v)) {
       v = 0.0f;
     }
     return v;
+  }
 }
 
 float getSensorValue2() 
 {
-    //return (random(0, 600) / 10); 
+  if (GET_FAKE_SENSOR)
+  {
+    return (random(0, 1000) / 10); 
+  }
+  else
+  {
     float v = dht.getHumidity();
     if (isnan(v)) {
       v = 0.0f;
     }
     return v;
+  }
 
 }
 
@@ -655,6 +679,11 @@ void setup() {
     setupAP();
 
   lastContactState = (getContactValue() == HIGH);
+
+  //ntp.ruleDST("CEST", Last, Sun, Mar, 2, 120); // last sunday in march 2:00, timetone +120min (+1 GMT + 1h summertime offset)
+  //ntp.ruleSTD("CET", Last, Sun, Oct, 3, 60); // last sunday in october 3:00, timezone +60min (+1 GMT)
+  ntp.begin();
+
 }
 
 void loop() {
