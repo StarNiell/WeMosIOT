@@ -17,10 +17,10 @@ WiFiUDP wifiUdp;
 NTP ntp(wifiUdp);
 
 const bool SENSOR_ENABLED      = true;
-const bool GET_FAKE_SENSOR     = true;
-const bool SWITCH_ENABLED      = true;
-const bool BUTTON_ENABLED      = true;
-const bool CONTACT_ENABLED     = true;
+const bool GET_FAKE_SENSOR     = false;
+const bool SWITCH_ENABLED      = false;
+const bool BUTTON_ENABLED      = false;
+const bool CONTACT_ENABLED     = false;
 const bool INFRARED_ENABLED    = false;
 
 const uint16_t PIN_ONOFF      = 4;  //D2
@@ -357,7 +357,7 @@ void setActionSensor(int value)
   float sensorValue = getSensorValue(); 
   float sensorValue2 = getSensorValue2(); 
 
-  char *payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1, sensorValue2, "%", 1);
+  char *payload = getPayload(config.device_uid, typeSensor, sensorValue, "°C", 1, sensorValue2, "%RH", 1);
   char *pubTopic = getPubTopic(config.device_uid, typeSensor);
   
   //Send feedback
@@ -640,7 +640,7 @@ void setup() {
   pinMode(PIN_MODE, INPUT_PULLDOWN_16);
   pinMode(PIN_CONTACT, INPUT_PULLUP);
 
-  dht.setup(PIN_SENSOR, DHTesp::DHT11);
+  dht.setup(PIN_SENSOR, DHTesp::AUTO_DETECT);
 
 
   digitalWrite(PIN_LED_GREEN, HIGH);
