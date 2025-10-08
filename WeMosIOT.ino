@@ -16,10 +16,10 @@ DHTesp dht;
 WiFiUDP wifiUdp;
 NTP ntp(wifiUdp);
 
-const bool SENSOR_ENABLED      = true;
+const bool SENSOR_ENABLED      = false;
 const bool GET_FAKE_SENSOR     = false;
-const bool SWITCH_ENABLED      = false;
-const bool BUTTON_ENABLED      = false;
+const bool SWITCH_ENABLED      = true;
+const bool BUTTON_ENABLED      = true;
 const bool CONTACT_ENABLED     = false;
 const bool INFRARED_ENABLED    = false;
 
@@ -66,9 +66,9 @@ Config config;
 String pub_payload = "{\"device_id\": \"<type>-<device_id>\", \"timestamp\": \"<timestamp>\", \"type\": \"<type>\", \"value\": <value>, \"unit\": \"<unit>\", \"value2\": <value2>, \"unit2\": \"<unit2>\", \"subscription\": \"<subscription>\" , \"status\": \"<status>\" }";
 String pub_topic = "<topic>/<type>-<device_id>";
 
-unsigned long sensorInterval = 60; //Seconds between 
-unsigned long sensorStartTime = millis();
-unsigned long sensorElapsedTime = 0;
+unsigned long idleInterval = 60; //Seconds between 
+unsigned long idleStartTime = millis();
+unsigned long idleElapsedTime = 0;
 
 // Loads the configuration from a file
 void loadConfiguration(const char *filename, Config &config) {
@@ -289,11 +289,6 @@ float getSensorValue2()
 
 }
 
-int getContactValue()
-{
-  return digitalRead(PIN_CONTACT);
-}
-
 void setActionOnOff(int value)
 {
   char *payload = getPayload(config.device_uid, typeSwitch, (float)value, "state", 0, 0.0f, "", 0);
@@ -351,7 +346,7 @@ void setActionSensor(int value)
 
   if (value > 1)
   {
-    sensorInterval = value;
+    idleInterval = value;
   }
 
   float sensorValue = getSensorValue(); 
@@ -412,33 +407,89 @@ void setActionButton()
   }
 }
 
+void sendStatusButton()
+{
+  char *payload;
+  if (digitalRead(PIN_ONOFF) == HIGH)
+    payload = getPayload(config.device_uid, typeButton, 1.0f, "state", 0, 0.0f, "", 0);
+  else
+    payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0, 0.0f, "", 0);
+
+  char *pubTopic = getPubTopic(config.device_uid, typeButton);
+
+  //Send status
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+}
+
+void sendStatusSwitch()
+{
+  char *payload;
+  if (digitalRead(PIN_ONOFF) == HIGH)
+    payload = getPayload(config.device_uid, typeSwitch, 1.0f, "state", 0, 0.0f, "", 0);
+  else
+    payload = getPayload(config.device_uid, typeSwitch, 0.0f, "state", 0, 0.0f, "", 0);
+
+  char *pubTopic = getPubTopic(config.device_uid, typeSwitch);
+
+  //Send status
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+}
+
+void sendStatusContact()
+{
+  char *payload;
+
+  int contactValue = digitalRead(PIN_CONTACT)==HIGH ? 0 : 1; 
+  lastContactState = (digitalRead(PIN_CONTACT) == HIGH);
+  payload = getPayload(config.device_uid, typeContact, float(contactValue), "state", 0, 0.0f, "", 0);
+  char *pubTopic = getPubTopic(config.device_uid, typeContact);
+
+  //Send status
+  if (mqtt_client.connected())
+  {
+    mqtt_client.publish(pubTopic, payload, true);
+  }
+}
+
 void sendInitialStatusRetained()
 {
-  char *payload = "";
-  char *pubTopic = "";
+  char *payload;
+  char *pubTopic;
 
   Serial.println("sendInitialStatusRetained()");
 
   //Switch
   if (SWITCH_ENABLED)
   {
+    sendStatusSwitch();
+    /*
     payload = getPayload(config.device_uid, typeSwitch, 0.0f, "state", 0, 0.0f, "", 0);
     pubTopic = getPubTopic(config.device_uid, typeSwitch);
     if (mqtt_client.connected())
     {
       mqtt_client.publish(pubTopic, payload, true);
     }
+    */
   }
 
   //Button
   if (BUTTON_ENABLED)
   {
+    sendStatusButton();
+    /*
     payload = getPayload(config.device_uid, typeButton, 0.0f, "state", 0, 0.0f, "", 0);
     pubTopic = getPubTopic(config.device_uid, typeButton);
     if (mqtt_client.connected())
     {
       mqtt_client.publish(pubTopic, payload, true);
     }
+    */
   }
 
   //Sensor
@@ -459,6 +510,7 @@ void sendInitialStatusRetained()
   //Contact
   if (CONTACT_ENABLED)
   {
+    /*
     int contactValue = getContactValue()==1 ? 0 : 1; 
     lastContactState = (getContactValue() == HIGH);
     payload = getPayload(config.device_uid, typeContact, float(contactValue), "state", 0, 0.0f, "", 0);
@@ -469,6 +521,8 @@ void sendInitialStatusRetained()
       Serial.print("Contact payload: ");
       Serial.println(payload);
     }
+    */
+    sendStatusContact();
   }
 
   //Infrared
@@ -678,7 +732,7 @@ void setup() {
   else
     setupAP();
 
-  lastContactState = (getContactValue() == HIGH);
+  lastContactState = (digitalRead(PIN_CONTACT) == HIGH);
 
   //ntp.ruleDST("CEST", Last, Sun, Mar, 2, 120); // last sunday in march 2:00, timetone +120min (+1 GMT + 1h summertime offset)
   //ntp.ruleSTD("CET", Last, Sun, Oct, 3, 60); // last sunday in october 3:00, timezone +60min (+1 GMT)
@@ -703,24 +757,35 @@ void loop() {
     }
     mqtt_client.loop();
 
-    if (SENSOR_ENABLED)
+    if ((millis() - idleStartTime) >= (idleInterval * 1000))
     {
-      if ((millis() - sensorStartTime) >= (sensorInterval * 1000))
+      idleStartTime = millis();
+      if (SENSOR_ENABLED)
       {
-        sensorStartTime = millis();
         setActionSensor(0);
+      }
+      if (CONTACT_ENABLED)
+      {
+        sendStatusContact();
+      }
+      if (SWITCH_ENABLED)
+      {
+        sendStatusSwitch();
+      }
+      if (BUTTON_ENABLED)
+      {
+        sendStatusButton();
       }
     }
 
     if (CONTACT_ENABLED)
     {
-      int currentContactState = getContactValue();
+      int currentContactState = digitalRead(PIN_CONTACT);
       if ((currentContactState == HIGH) != lastContactState)
       {
         setActionContact(currentContactState == HIGH ? 0 : 1);
       }
       lastContactState = (currentContactState == HIGH);
     }
-
   }
 }
