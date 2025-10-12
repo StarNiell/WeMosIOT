@@ -8,6 +8,7 @@
 #include "DHTesp.h"
 #include <NTP.h>
 #include <WiFiUdp.h>
+#include <Espalexa.h>
 
 ESP8266WebServer server(80);
 WiFiClient espClient;
@@ -16,12 +17,13 @@ DHTesp dht;
 WiFiUDP wifiUdp;
 NTP ntp(wifiUdp);
 
-const bool SENSOR_ENABLED      = false;
-const bool GET_FAKE_SENSOR     = false;
+const bool SENSOR_ENABLED      = true;
+const bool GET_FAKE_SENSOR     = true;
 const bool SWITCH_ENABLED      = true;
 const bool BUTTON_ENABLED      = true;
-const bool CONTACT_ENABLED     = false;
+const bool CONTACT_ENABLED     = true;
 const bool INFRARED_ENABLED    = false;
+const bool ESPALEXA_ENABLED    = false;
 
 const uint16_t PIN_ONOFF      = 4;  //D2
 const uint16_t PIN_CONTACT    = 0;  //D3
@@ -69,6 +71,8 @@ String pub_topic = "<topic>/<type>-<device_id>";
 unsigned long idleInterval = 60; //Seconds between 
 unsigned long idleStartTime = millis();
 unsigned long idleElapsedTime = 0;
+
+Espalexa espalexa;
 
 // Loads the configuration from a file
 void loadConfiguration(const char *filename, Config &config) {
@@ -652,10 +656,6 @@ void mqttConnect() {
 void setupWebServer() {
   server.serveStatic("/", LittleFS, "/", "no-cache, no-store, must-revalidate");
   
-  server.onNotFound([](){ 
-    server.send(404, "text/plain", "Landing page not found! you can chose: 'index.html' or 'config.html!");  
-  });
- 
   server.on("/saveconfig", HTTP_POST, []() {
     strcpy(config.wifi_ssid,     server.arg("wifi_ssid").c_str());
     strcpy(config.wifi_pwd,      server.arg("wifi_pwd").c_str());
@@ -681,8 +681,45 @@ void setupWebServer() {
       server.send(500, "text/plane","Unable to save the IOT eXperience Configuration! Please reboot the system and retry.");
     }
   });
+
+  server.onNotFound([](){ 
+    server.send(404, "text/plain", "Landing page not found! you can chose: 'index.html' or 'config.html!");  
+  });
+
   server.begin();
   digitalWrite(PIN_LED_RED, HIGH);
+}
+
+void setupEspalexaWebServer() {
+  server.onNotFound([](){ 
+    if (!espalexa.handleAlexaApiCall(server.uri(),server.arg(0))) //if you don't know the URI, ask espalexa whether it is an Alexa control request
+    {
+      server.send(404, "text/plain", "Landing page not found! you can chose: 'index.html' or 'config.html!");  
+    }
+  });
+
+  // Define your devices here.
+  espalexa.addDevice("Luci Garage", luciGarageChanged); //simplest definition, default state off
+  Serial.println("EspAlexa... added Luci Garage");
+
+  Serial.println("espalexa.begin");
+  espalexa.begin(&server); //give espalexa a pointer to your server object so it can use your server instead of creating its own  
+}
+
+void luciGarageChanged(uint8_t brightness) {
+    Serial.print("Luci garace changed to ");
+    
+    //do what you need to do here
+
+    //EXAMPLE
+    if (brightness > 0) {
+      Serial.println("ON");
+      setActionOnOff(1);
+    }
+    else if (brightness == 0) {
+      Serial.println("OFF");
+      setActionOnOff(0);
+    }
 }
 
 void setup() {
@@ -728,9 +765,17 @@ void setup() {
   Serial.print("config.mqtt_pwd: "); Serial.println(config.mqtt_pwd);
 
   if (iMode == 0)
+  {
     setupMqtt();
+    if (ESPALEXA_ENABLED)
+    {
+      setupEspalexaWebServer();
+    }
+  }
   else
+  {
     setupAP();
+  }
 
   lastContactState = (digitalRead(PIN_CONTACT) == HIGH);
 
@@ -787,5 +832,8 @@ void loop() {
       }
       lastContactState = (currentContactState == HIGH);
     }
+
+    espalexa.loop();
+    delay(1);
   }
 }
