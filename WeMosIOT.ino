@@ -17,11 +17,11 @@ DHTesp dht;
 WiFiUDP wifiUdp;
 NTP ntp(wifiUdp);
 
-const bool SENSOR_ENABLED      = true;
-const bool GET_FAKE_SENSOR     = true;
+const bool SENSOR_ENABLED      = false;
+const bool GET_FAKE_SENSOR     = false;
 const bool SWITCH_ENABLED      = true;
 const bool BUTTON_ENABLED      = true;
-const bool CONTACT_ENABLED     = true;
+const bool CONTACT_ENABLED     = false;
 const bool INFRARED_ENABLED    = false;
 const bool ESPALEXA_ENABLED    = false;
 
@@ -31,9 +31,27 @@ const uint16_t PIN_SENSOR     = 2;  //D4
 const uint16_t PIN_MANUAL     = 14; //D5
 const uint16_t PIN_LED_RED    = 16; //D0
 const uint16_t PIN_LED_GREEN  = 5;  //D1
-const uint16_t PIN_MODE       = 15; //D8 (Pulldown)
+const uint16_t PIN_MODE       = 15; //D8 (Pulldown) 
 
-bool lastConnectionStatus = false;
+/*
+Set Mode Configuration:
+  start ESP device
+  switch PINOMDE to 3.3v and wait more than 1 sec.
+  relase PINMODE
+*/
+
+/*
+Acquire Contact:
+  switch PIN_CONTACT to GND
+    a sense value [on] will sent to mqtt server
+  relase PIN_CONTACT from GND
+    a sense value [off] will sent to mqtt server
+
+*/
+
+const uint8_t maxConnectionAttempts = 60; // Set to 0 for never restart
+
+uint8_t connectionAttempts = 0;
 String sid = "StarNiell WiFi";
 String pwd = "abcd1234";
 const char *sidAP = "WD1R2-REMOTE";
@@ -617,6 +635,12 @@ void wifiConnect() {
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
     delay(1000);
+    connectionAttempts++;
+    if (maxConnectionAttempts > 0 && connectionAttempts > maxConnectionAttempts)
+    {
+      Serial.println("maxConnectionAttempts reached... restart ESP device!");
+      ESP.restart();
+    }
   }
 
   Serial.println("\nWiFi connected.");
@@ -636,6 +660,7 @@ void mqttConnect() {
   while(!mqtt_client.connected())
   {
     if (mqtt_client.connect(config.device_uid, config.mqtt_username, config.mqtt_pwd)) {
+        connectionAttempts = 0;
         Serial.print("Connected to MQTT broker as Client: ");
         Serial.println(config.device_uid);
         mqtt_client.subscribe(config.topic_sub);
@@ -647,8 +672,14 @@ void mqttConnect() {
     }
     else
     {
-      Serial.print(".");
+      Serial.print("*");
       delay(1000);
+      connectionAttempts++;
+      if (maxConnectionAttempts > 0 && connectionAttempts > maxConnectionAttempts)
+      {
+        Serial.println("maxConnectionAttempts reached... restart ESP device!");
+        ESP.restart();
+      }
     }
   }
 }
