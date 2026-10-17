@@ -91,6 +91,7 @@ void setup() {
   const bool configMode = configModeRequested();
 
   if (!platform::fsBegin()) LOG("LittleFS mount failed");
+  configRemoveLegacyFiles();
   configLoad();
 
   netBegin(configMode);

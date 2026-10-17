@@ -19,7 +19,7 @@ The source tree is the same for every board; the differences between the ESP8266
 
 ### Pins
 
-Pins are defined in `src/defaults.h` and can be overridden per environment from `platformio.ini` (e.g. `build_flags = -DPIN_OUTPUT=12`).
+Pins are defined in `src/defaults.h` and can be overridden per environment from `platformio.ini` (see [Build options](#build-options)).
 
 | Function | D1 mini | GPIO | ESP32-C (provisional) | Notes |
 |---|---|---|---|---|
@@ -33,7 +33,7 @@ Pins are defined in `src/defaults.h` and can be overridden per environment from 
 
 ## Functions
 
-Functions are still selected **at compile time** in `src/defaults.h` (overridable with `build_flags`); they will move to the web configuration in a later step.
+Functions are still selected **at compile time** (see [Build options](#build-options)); they will move to the web configuration in a later step. The web page shows which functions are active.
 
 | Option | MQTT type | Default | Description |
 |---|---|---|---|
@@ -72,33 +72,60 @@ The device creates the WiFi network `WD1R2-REMOTE` (password `12345678`) and doe
 
 ## Web configuration
 
-The web server is **always active**:
+The configuration page is **always available**:
 
 | Situation | Address |
 |---|---|
 | Normal operation | `http://<device IP>/` or `http://iotx-<device-uid>.local/` (mDNS) |
 | Access point | `http://192.168.4.1/` |
 
-Every page requires a login:
+Type `http://` explicitly: browsers that try `https://` first will not reach the device.
 
-| Field | Default |
-|---|---|
-| User | `admin` |
-| Password | `iotxadmin` |
+Every page requires a login. The user is `admin`; the default password is `iotxadmin`, which can be changed from the page itself (section *Page password*).
 
-The password is stored in the configuration (`web-pwd`) and will be editable from the new configuration page in the next step. After saving, reboot the device to apply the new settings.
+The page shows the state of the device (with the two LEDs as they are on the board) and lets you change:
+
+- the Wi-Fi network;
+- the MQTT broker;
+- device ID and topics;
+- the password of the page.
+
+**Save and restart** validates the values, saves them and restarts the device. Password fields left empty keep the stored password.
+
+The page also offers **Restart** and **Reset to factory settings**. The reset erases the configuration, and the device restarts as an access point.
+
+The page (`web/index.html`) is compressed and **embedded in the firmware** by `tools/embed_web.py`, which PlatformIO runs before every build. Flashing the firmware updates the page; the configuration on LittleFS is not touched.
+
+### JSON API
+
+All endpoints require the same login as the page.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/status` | device state: firmware, uptime, free memory, Wi-Fi, access point, MQTT, active functions, output |
+| `GET` | `/api/config` | configuration; passwords are never returned, `<name>-set` tells whether one is stored |
+| `POST` | `/api/config` | JSON body with the keys to change; validated, saved, then the device restarts |
+| `POST` | `/api/restart` | restart the device |
+| `POST` | `/api/reset` | erase the configuration and restart |
+
+Errors return `{"ok": false, "error": "<message>", "field": "<key>"}` with HTTP status 400 or 500.
+
+### Stored configuration
 
 The configuration is stored on LittleFS in `/store/config.json` (never served by the web server):
 
 | Key | Description | Default |
 |---|---|---|
+| `config-version` | format version (current: 2) | – |
 | `wifi-ssid`, `wifi-pwd` | WiFi network | – |
-| `mqtt-server`, `mqtt-port` | MQTT broker | –, `1883` |
+| `mqtt-server`, `mqtt-port` | MQTT broker (empty server = no MQTT) | –, `1883` |
 | `mqtt-username`, `mqtt-pwd` | broker credentials (optional) | – |
-| `device-uid` | device identifier | `999` |
+| `device-uid` | device identifier: 1–15 letters, digits, `-`, `_` | `999` |
 | `topic-sub` | commands topic | `iotx/in` |
 | `topic-pub` | root of the status topics | `iotx/out` |
-| `web-pwd` | password of the web pages | `iotxadmin` |
+| `web-pwd` | password of the web page | `iotxadmin` |
+
+Files written by firmware 1.0 (no `config-version`) are read as they are and converted at the next save. The files of the old page (`index.html`, `index.static`, `css/`, `js/`) are removed from LittleFS at start-up.
 
 `data/store/config.json` in this repository is only a template: **never commit real credentials**.
 
@@ -152,14 +179,70 @@ Topic: `<topic-sub>` (e.g. `iotx/in`). `device_id` must match `<type>-<device-ui
 
 | Command | Action |
 |---|---|
-| `pio run -e d1_mini` | build |
-| `pio run -e d1_mini -t upload` | flash the firmware |
+| `pio run -e d1_mini` | build (also embeds the web page) |
+| `pio run -e d1_mini -t upload` | flash the firmware: this is all an update needs |
 | `pio run -e d1_mini -t uploadfs` | flash the LittleFS image built from `data/` |
 | `pio device monitor` | serial monitor (115200 baud) |
 
-The LittleFS image **replaces the stored configuration** with the template. On devices that are already configured, flash the firmware only.
+`uploadfs` **replaces the stored configuration** with the template in `data/`. Use it only on a new device, never for updates.
 
 The `d1_mini` environment uses the same flash layout as the Arduino IDE default (FS 2 MB). The configuration already stored on existing devices is therefore preserved.
+
+## Build options
+
+Every option below is defined in `src/defaults.h` and can be overridden per environment in `platformio.ini`:
+
+```ini
+build_flags =
+    -DCFG_SENSOR_ENABLED=1
+    -DDEFAULT_WEB_PWD=\"mypassword\"
+```
+
+Write each flag without spaces around `=`; text values need escaped quotes (`\"...\"`).
+
+### Functions (`1` on, `0` off)
+
+| Flag | Default | Description |
+|---|---|---|
+| `CFG_SWITCH_ENABLED` | 1 | on/off output |
+| `CFG_BUTTON_ENABLED` | 1 | 1 s pulse on the output |
+| `CFG_SENSOR_ENABLED` | 0 | DHT temperature / humidity |
+| `CFG_FAKE_SENSOR` | 0 | random sensor values, for testing |
+| `CFG_CONTACT_ENABLED` | 0 | contact input |
+| `CFG_INFRARED_ENABLED` | 0 | placeholder, not implemented |
+
+### Pins (GPIO numbers)
+
+| Flag | D1 mini | ESP32-C |
+|---|---|---|
+| `PIN_OUTPUT` | 4 (D2) | 6 |
+| `PIN_CONTACT` | 0 (D3) | 7 |
+| `PIN_SENSOR` | 2 (D4) | 3 |
+| `PIN_MANUAL` | 14 (D5) | 10 |
+| `PIN_LED_RED` | 16 (D0) | 0 |
+| `PIN_LED_GREEN` | 5 (D1) | 1 |
+| `PIN_MODE` | 15 (D8) | 9 |
+| `PIN_MODE_ACTIVE` | `HIGH` | `LOW` |
+
+On the WeMos D1 in Arduino UNO format the silkscreen differs from the D1 mini: GPIO4 is marked D4/D14 and GPIO16 is marked D2.
+
+### Defaults of the configuration
+
+Used only when `/store/config.json` lacks the value:
+
+| Flag | Default |
+|---|---|
+| `DEFAULT_MQTT_SERVER` | `""` |
+| `DEFAULT_MQTT_PORT` | `1883` |
+| `DEFAULT_DEVICE_UID` | `"999"` |
+| `DEFAULT_TOPIC_SUB` | `"iotx/in"` |
+| `DEFAULT_TOPIC_PUB` | `"iotx/out"` |
+| `WEB_USER` | `"admin"` |
+| `DEFAULT_WEB_PWD` | `"iotxadmin"` |
+| `AP_SSID` | `"WD1R2-REMOTE"` |
+| `AP_PWD` | `"12345678"` (at least 8 characters) |
+
+Timings (`WIFI_AP_FALLBACK_S`, `STATUS_INTERVAL_S`, `OFFLINE_RESTART_S`...) are set directly in `src/defaults.h`.
 
 ## Repository layout
 
@@ -173,8 +256,11 @@ src/
   net.h/.cpp            WiFi, access point, mDNS, time sync
   mqttlink.h/.cpp       MQTT connection and commands
   devices.h/.cpp        device functions and status messages
-  web.h/.cpp            web server
-data/                   LittleFS content (configuration page, template config)
+  web.h/.cpp            web server and JSON API
+  web_assets.h          generated from web/index.html (not in git)
+web/index.html          configuration page (embedded in the firmware)
+tools/embed_web.py      compresses the page into src/web_assets.h
+data/store/config.json  configuration template for new devices (uploadfs)
 ```
 
 ## Roadmap
@@ -182,8 +268,8 @@ data/                   LittleFS content (configuration page, template config)
 | Step | Content | Status |
 |---|---|---|
 | 0 | Minimal fixes (compile error, invalid `config.json`, credentials removed) | done |
-| 1 | PlatformIO, modular structure, non-blocking loop, web server always on, automatic access point, mDNS, IP in the payload | **done** |
-| 2 | JSON API and new configuration page (password editable, automatic reboot) | |
+| 1 | PlatformIO, modular structure, non-blocking loop, web server always on, automatic access point, mDNS, IP in the payload | done |
+| 2 | JSON API and new configuration page (password editable, automatic restart) | **done** |
 | 3 | WiFi network selection from a scan | |
 | 4 | Functions and pins configurable from the web page ("Advanced" section) | |
 | 5 | Smart features (see below) | |
