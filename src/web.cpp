@@ -4,8 +4,9 @@
 //   GET  /api/status   device state
 //   GET  /api/config   configuration (passwords excluded)
 //   POST /api/config   validate + save the configuration, then restart
-//   POST /api/restart  restart the device
+//   POST /api/restart  restart the device (?mode=ap: in access point mode)
 //   POST /api/reset    erase the configuration, then restart
+//   GET  /api/scan     WiFi networks in range (?refresh=1 starts a new scan)
 //
 // Every request requires HTTP basic authentication
 // (user WEB_USER, password config.web_pwd).
@@ -139,8 +140,13 @@ static void handlePostConfig() {
 
 static void handleRestart() {
   if (!authenticate()) return;
+  const bool apMode = s_server.arg("mode") == "ap";
+  if (apMode && !configRequestApBoot()) {
+    sendResult(500, "The request could not be written to the flash memory.");
+    return;
+  }
   sendResult(200);
-  LOG("Restart requested from the web page");
+  LOG("Restart%s requested from the web page", apMode ? " in access point mode" : "");
   scheduleRestart();
 }
 
@@ -153,6 +159,32 @@ static void handleReset() {
   sendResult(200);
   LOG("Factory reset requested from the web page");
   scheduleRestart();
+}
+
+// Results older than this are refreshed automatically.
+static const uint32_t SCAN_MAX_AGE_MS = 60000;
+
+static void handleScan() {
+  if (!authenticate()) return;
+
+  const bool refresh = s_server.arg("refresh") == "1";
+  if (!netScanRunning() && (refresh || netScanAge() > SCAN_MAX_AGE_MS)) netScanStart();
+
+  JsonDocument doc;
+  doc["scanning"] = netScanRunning();
+  doc["failed"]   = netScanFailed();
+  uint32_t age = netScanAge();
+  if (age != UINT32_MAX) doc["age"] = age / 1000;
+  JsonArray list = doc["networks"].to<JsonArray>();
+  for (uint8_t i = 0; i < netScanCount(); i++) {
+    const NetScanResult &r = netScanResult(i);
+    JsonObject n = list.add<JsonObject>();
+    n["ssid"]    = r.ssid;
+    n["rssi"]    = r.rssi;
+    n["channel"] = r.channel;
+    n["secure"]  = r.secure;
+  }
+  sendJson(200, doc);
 }
 
 static void handleFavicon() {
@@ -178,6 +210,7 @@ void webBegin() {
   s_server.on("/api/config",  HTTP_POST, handlePostConfig);
   s_server.on("/api/restart", HTTP_POST, handleRestart);
   s_server.on("/api/reset",   HTTP_POST, handleReset);
+  s_server.on("/api/scan",    HTTP_GET,  handleScan);
   s_server.on("/favicon.ico", HTTP_GET,  handleFavicon);
   s_server.onNotFound(handleNotFound);
   s_server.begin();

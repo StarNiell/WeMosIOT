@@ -4,7 +4,8 @@
 //
 // Start-up:
 //   1. both LEDs on for BOOT_WINDOW_MS: activating PIN_MODE in this window
-//      starts the configuration access point;
+//      starts the configuration access point (the web page can request the
+//      same for the next boot: "Restart in access point mode");
 //   2. otherwise the device joins the configured WiFi and MQTT broker.
 //      If the WiFi is unreachable for WIFI_AP_FALLBACK_S seconds the
 //      configuration access point is opened as well.
@@ -88,9 +89,13 @@ void setup() {
   LOG("%s v%s (%s, chip %06X)", FW_NAME, FW_VERSION, PLATFORM_NAME, (unsigned)platform::chipId());
 
   devicesBegin();
-  const bool configMode = configModeRequested();
+  bool configMode = configModeRequested();
 
   if (!platform::fsBegin()) LOG("LittleFS mount failed");
+  if (configTakeApBootRequest()) {
+    LOG("Access point mode requested from the web page");
+    configMode = true;
+  }
   configRemoveLegacyFiles();
   configLoad();
 

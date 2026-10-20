@@ -23,6 +23,14 @@ static uint32_t s_connectedSince = 0;   // millis() when the WiFi came back
 static uint32_t s_lastBegin      = 0;   // millis() of the last WiFi.begin()
 static char     s_hostname[32]   = "";
 
+// Scan state
+static bool          s_scanRunning = false;
+static bool          s_scanFailed  = false;
+static uint32_t      s_scanDoneAt  = 0;
+static bool          s_scanHasData = false;
+static NetScanResult s_scan[NET_SCAN_MAX];
+static uint8_t       s_scanCount   = 0;
+
 // "iotx-<uid>", lower case, letters/digits/hyphens only.
 static void buildHostname() {
   snprintf(s_hostname, sizeof(s_hostname), "iotx-%s", config.device_uid);
@@ -32,8 +40,9 @@ static void buildHostname() {
   }
 }
 
-static void startAP(bool keepStation) {
-  WiFi.mode(keepStation ? WIFI_AP_STA : WIFI_AP);
+static void startAP() {
+  // AP+STA in every case: the station interface is needed to scan networks.
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAP(AP_SSID, AP_PWD);
   s_apActive = true;
   LOG("Access point '%s' started, IP %s", AP_SSID, WiFi.softAPIP().toString().c_str());
@@ -59,7 +68,7 @@ void netBegin(bool configAP) {
   if (configAP || !configHasWifi()) {
     s_mode = NetMode::ConfigAP;
     LOG("%s", configAP ? "Configuration mode requested" : "No WiFi configured: configuration mode");
-    startAP(false);
+    startAP();
     return;
   }
 
@@ -85,7 +94,10 @@ static void onConnected() {
   configTime(0, 0, NTP_SERVER_1, NTP_SERVER_2);
 }
 
+static void scanLoop();
+
 void netLoop() {
+  scanLoop();
   if (s_mode != NetMode::Station) return;
 
   const uint32_t now = millis();
@@ -116,7 +128,7 @@ void netLoop() {
   // Not connected: open the fallback AP after WIFI_AP_FALLBACK_S.
   if (!s_apActive && now - s_lostSince > WIFI_AP_FALLBACK_S * 1000UL) {
     LOG("No WiFi for %lu s: opening the configuration access point", WIFI_AP_FALLBACK_S);
-    startAP(true);
+    startAP();
   }
 
   if (s_apActive) {
@@ -147,3 +159,87 @@ String netIp() {
 }
 
 const char *netHostname() { return s_hostname; }
+
+// ---------------------------------------------------------------------------
+// WiFi scan
+// ---------------------------------------------------------------------------
+bool netScanStart() {
+  if (s_scanRunning) return false;
+  WiFi.scanNetworks(true, false);       // async, hidden networks excluded
+  s_scanRunning = true;
+  s_scanFailed  = false;
+  LOG("WiFi scan started");
+  return true;
+}
+
+// Collect the results of a completed scan: hidden networks are skipped,
+// duplicates (same SSID on several access points) keep the strongest.
+static void scanLoop() {
+  if (!s_scanRunning) return;
+  int n = WiFi.scanComplete();
+  if (n == -1) return;                  // still running (WIFI_SCAN_RUNNING)
+  s_scanRunning = false;
+  if (n < 0) {                          // WIFI_SCAN_FAILED
+    s_scanFailed = true;
+    LOG("WiFi scan failed");
+    WiFi.scanDelete();
+    return;
+  }
+
+  s_scanCount = 0;
+  for (int i = 0; i < n; i++) {
+    String ssid = WiFi.SSID(i);
+    if (ssid.length() == 0 || ssid.length() > 32) continue;
+    int8_t rssi = WiFi.RSSI(i);
+#if defined(ESP8266)
+    bool secure = WiFi.encryptionType(i) != ENC_TYPE_NONE;
+#else
+    bool secure = WiFi.encryptionType(i) != WIFI_AUTH_OPEN;
+#endif
+    int found = -1;
+    for (uint8_t j = 0; j < s_scanCount; j++) {
+      if (ssid.equals(s_scan[j].ssid)) { found = j; break; }
+    }
+    if (found >= 0) {
+      if (rssi > s_scan[found].rssi) {
+        s_scan[found].rssi = rssi;
+        s_scan[found].channel = WiFi.channel(i);
+        s_scan[found].secure = secure;
+      }
+      continue;
+    }
+    // Keep the strongest NET_SCAN_MAX networks.
+    uint8_t slot = s_scanCount;
+    if (s_scanCount == NET_SCAN_MAX) {
+      uint8_t weakest = 0;
+      for (uint8_t j = 1; j < s_scanCount; j++) if (s_scan[j].rssi < s_scan[weakest].rssi) weakest = j;
+      if (rssi <= s_scan[weakest].rssi) continue;
+      slot = weakest;
+    } else {
+      s_scanCount++;
+    }
+    strlcpy(s_scan[slot].ssid, ssid.c_str(), sizeof(s_scan[slot].ssid));
+    s_scan[slot].rssi = rssi;
+    s_scan[slot].channel = WiFi.channel(i);
+    s_scan[slot].secure = secure;
+  }
+  WiFi.scanDelete();
+
+  // Strongest first (insertion sort, at most NET_SCAN_MAX items).
+  for (uint8_t i = 1; i < s_scanCount; i++) {
+    NetScanResult item = s_scan[i];
+    int j = i - 1;
+    while (j >= 0 && s_scan[j].rssi < item.rssi) { s_scan[j + 1] = s_scan[j]; j--; }
+    s_scan[j + 1] = item;
+  }
+
+  s_scanHasData = true;
+  s_scanDoneAt  = millis();
+  LOG("WiFi scan: %d access points, %u networks", n, s_scanCount);
+}
+
+bool     netScanRunning() { return s_scanRunning; }
+bool     netScanFailed()  { return s_scanFailed; }
+uint32_t netScanAge()     { return s_scanHasData ? millis() - s_scanDoneAt : UINT32_MAX; }
+uint8_t  netScanCount()   { return s_scanCount; }
+const NetScanResult &netScanResult(uint8_t i) { return s_scan[i < s_scanCount ? i : 0]; }

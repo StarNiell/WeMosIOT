@@ -100,6 +100,26 @@ input[aria-invalid="true"] { border-color: var(--danger); }
   position: absolute; right: 4px; top: 4px; bottom: 4px; border: 0; background: none;
   color: var(--accent); font: inherit; font-size: .85rem; font-weight: 600; padding: 0 10px; cursor: pointer;
 }
+/* Networks in range */
+.nets { margin-top: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); }
+.nets-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 12px; font-size: .88rem; color: var(--muted); }
+.nets-head button { font: inherit; font-size: .88rem; font-weight: 600; color: var(--accent); background: none; border: 0; padding: 4px 6px; cursor: pointer; }
+.nets ul { list-style: none; margin: 0; padding: 0; max-height: 15.5rem; overflow-y: auto; }
+.nets li button {
+  width: 100%; display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 10px;
+  padding: 10px 12px; background: none; border: 0; border-top: 1px solid var(--line); color: var(--ink);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.nets li button:hover { background: var(--plate); }
+.nets li button[aria-pressed="true"] { background: var(--plate); font-weight: 600; }
+.nets .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nets .meta { color: var(--muted); font-size: .82rem; white-space: nowrap; }
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
+.bars i { width: 4px; background: var(--line); border-radius: 1px; }
+.bars i:nth-child(1) { height: 25%; } .bars i:nth-child(2) { height: 50%; }
+.bars i:nth-child(3) { height: 75%; } .bars i:nth-child(4) { height: 100%; }
+.bars[data-level="1"] i:nth-child(-n+1), .bars[data-level="2"] i:nth-child(-n+2),
+.bars[data-level="3"] i:nth-child(-n+3), .bars[data-level="4"] i { background: var(--accent); }
 .err { color: var(--danger); font-size: .85rem; margin-top: 4px; min-height: 0; }
 .err:empty { display: none; }
 
@@ -166,8 +186,13 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
     <label for="wifi-ssid">Network name (SSID)</label>
     <input id="wifi-ssid" name="wifi-ssid" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" required>
     <div class="err" id="e-wifi-ssid"></div>
+    <div class="nets" id="nets">
+      <div class="nets-head"><span id="nets-msg" role="status">Choose a network from the list, or type its name.</span><button type="button" id="btn-scan">Find networks</button></div>
+      <ul id="nets-list" aria-label="Networks in range"></ul>
+    </div>
     <label for="wifi-pwd">Password</label>
     <div class="pwd"><input id="wifi-pwd" name="wifi-pwd" type="password" maxlength="63" autocomplete="new-password"><button type="button" data-show="wifi-pwd">Show</button></div>
+    <p class="hint" id="wifi-pwd-hint" style="margin-top:4px"></p>
     <div class="err" id="e-wifi-pwd"></div>
 
     <h2>MQTT broker</h2>
@@ -217,6 +242,7 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
   <p class="hint">Resetting erases every setting: the device restarts as the access point <span class="mono" id="ap-ssid">–</span>.</p>
   <div class="device-actions">
     <button class="secondary" type="button" id="btn-restart">Restart</button>
+    <button class="secondary" type="button" id="btn-restart-ap">Restart in access point mode</button>
     <button class="danger" type="button" id="btn-reset">Reset to factory settings</button>
   </div>
 
@@ -245,6 +271,10 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
                 "mqtt-pwd", "device-uid", "topic-sub", "topic-pub", "web-pwd"];
   var status = null;
   var pollTimer = null;
+  var stored = {};          // configuration as read from the device
+  var networks = [];        // last scan results
+  var scanTimer = null;
+  var autoScanned = false;
 
   function api(method, url, body) {
     var opt = { method: method, headers: {}, cache: "no-store" };
@@ -286,6 +316,8 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
     text("p-fw", s.firmware + " on " + s.platform + ", up " + formatUptime(s.uptime) +
       ", " + Math.round(s.heap / 1024) + " KB free");
     text("ap-ssid", s.ap.ssid);
+    $("btn-restart-ap").hidden = config;
+    $("btn-restart").textContent = config ? "Restart in normal mode" : "Restart";
     text("footer", "Chip " + s.chip + ", MAC " + s.mac);
 
     var state;
@@ -307,13 +339,20 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
   }
 
   function loadStatus() {
-    return api("GET", "/api/status").then(renderStatus).catch(function () {
+    return api("GET", "/api/status").then(function (s) {
+      renderStatus(s);
+      if (!autoScanned && (s.mode === "config" || !s.wifi.connected)) {
+        autoScanned = true;
+        scan(false);
+      }
+    }).catch(function () {
       text("p-state", "The device does not answer.");
     });
   }
 
   function loadConfig() {
     return api("GET", "/api/config").then(function (c) {
+      stored = c;
       FIELDS.forEach(function (k) {
         var el = $(k);
         if (/pwd$/.test(k)) {
@@ -323,19 +362,115 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
           el.value = c[k] === undefined ? "" : c[k];
         }
       });
+      updateWifiPassword();
     });
   }
+
+  // ---- Networks in range -------------------------------------------------
+  function level(rssi) {
+    return rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
+  }
+
+  function networkByName(name) {
+    for (var i = 0; i < networks.length; i++) if (networks[i].ssid === name) return networks[i];
+    return null;
+  }
+
+  // Password field: "Unchanged" only while the stored network is selected.
+  function updateWifiPassword() {
+    var ssid = $("wifi-ssid").value.trim();
+    var same = ssid !== "" && ssid === stored["wifi-ssid"];
+    var net = networkByName(ssid);
+    $("wifi-pwd").placeholder = same && stored["wifi-pwd-set"] ? "Unchanged" : "";
+    var hint = "";
+    if (!same && ssid) {
+      if (net && !net.secure) hint = "This network is open: no password needed.";
+      else if (net) hint = "Enter the password of " + ssid + ".";
+      else hint = "Leave empty only if the network is open.";
+    }
+    text("wifi-pwd-hint", hint);
+    $("wifi-pwd-hint").style.display = hint ? "" : "none";
+    var items = document.querySelectorAll("#nets-list button");
+    Array.prototype.forEach.call(items, function (b) {
+      b.setAttribute("aria-pressed", b.getAttribute("data-ssid") === ssid ? "true" : "false");
+    });
+  }
+
+  function renderNetworks(r) {
+    networks = r.networks || [];
+    var list = $("nets-list");
+    list.textContent = "";
+    var connected = status && status.wifi.connected ? status.wifi.ssid : null;
+    networks.forEach(function (n) {
+      var li = document.createElement("li");
+      var b = document.createElement("button");
+      b.type = "button";
+      b.setAttribute("data-ssid", n.ssid);
+      var bars = document.createElement("span");
+      bars.className = "bars";
+      bars.setAttribute("data-level", level(n.rssi));
+      bars.setAttribute("aria-hidden", "true");
+      bars.innerHTML = "<i></i><i></i><i></i><i></i>";
+      var name = document.createElement("span");
+      name.className = "name";
+      name.textContent = n.ssid;
+      var meta = document.createElement("span");
+      meta.className = "meta";
+      meta.textContent = (n.ssid === connected ? "connected, " : "") + (n.secure ? "secured" : "open") + ", " + n.rssi + " dBm";
+      b.appendChild(bars); b.appendChild(name); b.appendChild(meta);
+      b.addEventListener("click", function () {
+        $("wifi-ssid").value = n.ssid;
+        text("e-wifi-ssid", "");
+        $("wifi-ssid").removeAttribute("aria-invalid");
+        updateWifiPassword();
+        if (n.secure && n.ssid !== stored["wifi-ssid"]) $("wifi-pwd").focus();
+      });
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+    updateWifiPassword();
+  }
+
+  function scan(refresh) {
+    clearTimeout(scanTimer);
+    var tries = 0;
+    $("btn-scan").disabled = true;
+    text("nets-msg", "Searching for networks…");
+    (function poll(first) {
+      api("GET", "/api/scan" + (first && refresh ? "?refresh=1" : "")).then(function (r) {
+        if (r.scanning && ++tries < 20) {
+          scanTimer = setTimeout(function () { poll(false); }, 1500);
+          return;
+        }
+        $("btn-scan").disabled = false;
+        $("btn-scan").textContent = "Search again";
+        renderNetworks(r);
+        if (r.scanning) text("nets-msg", "The search is taking long. Try again.");
+        else if (r.failed) text("nets-msg", "The search failed. Try again.");
+        else if (!r.networks.length) text("nets-msg", "No networks found. Type the name of the network.");
+        else text("nets-msg", r.networks.length + (r.networks.length === 1 ? " network" : " networks") + " in range.");
+      }).catch(function () {
+        $("btn-scan").disabled = false;
+        text("nets-msg", "The device does not answer. Try again.");
+      });
+    })(true);
+  }
+
+  $("btn-scan").addEventListener("click", function () { scan(true); });
+  $("wifi-ssid").addEventListener("input", updateWifiPassword);
 
   function clearErrors() {
     FIELDS.concat(["web-pwd2"]).forEach(function (k) {
       text("e-" + k, "");
       $(k).removeAttribute("aria-invalid");
     });
+    updateWifiPassword();
   }
 
   function fieldError(k, msg) {
     text("e-" + k, msg);
     $(k).setAttribute("aria-invalid", "true");
+    if (k === "wifi-pwd") $("wifi-pwd-hint").style.display = "none";
   }
 
   function validate(c) {
@@ -344,6 +479,9 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
     var topic = /^[^+#\s\/][^+#\s]*[^+#\s\/]$|^[^+#\s\/]$/;
     if (!c["wifi-ssid"]) bad("wifi-ssid", "Enter the name of the Wi-Fi network.");
     if (c["wifi-pwd"] && (c["wifi-pwd"].length < 8)) bad("wifi-pwd", "A Wi-Fi password has at least 8 characters.");
+    var net = networkByName(c["wifi-ssid"]);
+    if (!c["wifi-pwd"] && net && net.secure && c["wifi-ssid"] !== stored["wifi-ssid"])
+      bad("wifi-pwd", "Enter the password of " + c["wifi-ssid"] + ".");
     var port = Number(c["mqtt-port"]);
     if (!(port >= 1 && port <= 65535 && port % 1 === 0)) bad("mqtt-port", "Enter a port between 1 and 65535.");
     if (!/^[A-Za-z0-9_-]{1,15}$/.test(c["device-uid"])) bad("device-uid", "Use 1 to 15 letters, digits, - or _.");
@@ -426,6 +564,16 @@ footer { margin-top: 40px; color: var(--muted); font-size: .85rem; }
     api("POST", "/api/restart").then(function () {
       showOverlay("Restarting", "The page reloads by itself when the device is back.");
       waitForDevice();
+    }).catch(function () { alert("The device does not answer."); });
+  });
+
+  $("btn-restart-ap").addEventListener("click", function () {
+    var ssid = status ? status.ap.ssid : "";
+    if (!confirm("Restart the device as the access point " + ssid + "?\n\nThe device stops working with MQTT until it restarts in normal mode. This page will lose the connection.")) return;
+    api("POST", "/api/restart?mode=ap").then(function () {
+      showOverlay("Restarting in access point mode",
+        "Connect this phone or computer to the Wi-Fi network " + ssid +
+        ", then open http://192.168.4.1. To return to normal operation, save the settings or press Restart in normal mode.");
     }).catch(function () { alert("The device does not answer."); });
   });
 

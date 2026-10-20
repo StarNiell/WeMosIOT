@@ -10,6 +10,7 @@ Config config;
 
 static const char *CONFIG_FILE = "/store/config.json";
 static const char *CONFIG_TMP  = "/store/config.tmp";
+static const char *AP_BOOT_FLAG = "/store/ap-boot";
 
 // Copy a JSON string value (or a default) into a fixed size buffer.
 static void copyValue(char *dst, size_t size, JsonVariantConst src, const char *def) {
@@ -176,6 +177,10 @@ bool configFromJson(JsonObjectConst in, String &field, String &error) {
       return false;
     }
     strlcpy(c.wifi_pwd, pwd, sizeof(c.wifi_pwd));
+  } else if (strcmp(c.wifi_ssid, config.wifi_ssid) != 0) {
+    // A different network without a password is an open network: the
+    // stored password belongs to the previous network.
+    c.wifi_pwd[0] = '\0';
   }
 
   if (!readString(in, "mqtt-server", c.mqtt_server, sizeof(c.mqtt_server), field, error)) return false;
@@ -221,6 +226,21 @@ bool configFromJson(JsonObjectConst in, String &field, String &error) {
   }
 
   config = c;
+  return true;
+}
+
+bool configRequestApBoot() {
+  if (!LittleFS.exists("/store")) LittleFS.mkdir("/store");
+  File f = LittleFS.open(AP_BOOT_FLAG, "w");
+  if (!f) return false;
+  f.print("1");
+  f.close();
+  return true;
+}
+
+bool configTakeApBootRequest() {
+  if (!LittleFS.exists(AP_BOOT_FLAG)) return false;
+  LittleFS.remove(AP_BOOT_FLAG);
   return true;
 }
 

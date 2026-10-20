@@ -40,9 +40,16 @@ bool configHasWifi();
 void configToJson(JsonObject out);
 
 // Validate the values in `in` and apply them to the configuration.
-// Missing keys, and empty passwords, leave the current value unchanged.
+// Missing keys, and empty passwords, leave the current value unchanged
+// (except the WiFi password when the network changes: see config.cpp).
 // On error returns false and fills `field` and `error`; nothing is changed.
 bool configFromJson(JsonObjectConst in, String &field, String &error);
+
+// One-shot request to start in configuration (access point) mode at the
+// next boot, as if PIN_MODE had been activated. Nothing is erased.
+bool configRequestApBoot();
+// True if a request is pending; the request is consumed.
+bool configTakeApBootRequest();
 
 // Remove the files of the old page-on-LittleFS configuration (firmware 1.0).
 void configRemoveLegacyFiles();

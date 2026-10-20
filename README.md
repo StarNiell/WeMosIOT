@@ -55,9 +55,10 @@ Functions are still selected **at compile time** (see [Build options](#build-opt
 ### Configuration mode (access point only)
 Entered when:
 - the configuration pin is activated during the 2 s window at power on (D1 mini: connect D8 to 3.3 V; ESP32-C: press BOOT), or
+- **Restart in access point mode** is pressed on the web page, or
 - no WiFi network has been configured yet.
 
-The device creates the WiFi network `WD1R2-REMOTE` (password `12345678`) and does not connect to MQTT.
+The device creates the WiFi network `WD1R2-REMOTE` (password `12345678`) and does not connect to MQTT. Its station interface stays on, so that the configuration page can list the networks in range.
 
 ### LEDs
 
@@ -85,14 +86,22 @@ Every page requires a login. The user is `admin`; the default password is `iotxa
 
 The page shows the state of the device (with the two LEDs as they are on the board) and lets you change:
 
-- the Wi-Fi network;
+- the Wi-Fi network, chosen from the networks in range or typed by hand (hidden networks);
 - the MQTT broker;
 - device ID and topics;
 - the password of the page.
 
-**Save and restart** validates the values, saves them and restarts the device. Password fields left empty keep the stored password.
+**Save and restart** validates the values, saves them and restarts the device. Password fields left empty keep the stored password, with one exception: when you choose a different Wi-Fi network and leave its password empty, the network is treated as open.
 
-The page also offers **Restart** and **Reset to factory settings**. The reset erases the configuration, and the device restarts as an access point.
+The list of networks is filled automatically when the device has no working Wi-Fi (first configuration, access point); otherwise press **Find networks**. Each network shows its signal, whether it is secured, and which one the device is connected to.
+
+The page also offers three device actions:
+
+| Action | Effect |
+|---|---|
+| **Restart** | normal restart; in configuration mode the button reads *Restart in normal mode* |
+| **Restart in access point mode** | the same as activating the configuration pin at power on: nothing is erased, and the device stays in configuration mode until you save or press *Restart in normal mode* |
+| **Reset to factory settings** | erases the configuration; the device restarts as an access point |
 
 The page (`web/index.html`) is compressed and **embedded in the firmware** by `tools/embed_web.py`, which PlatformIO runs before every build. Flashing the firmware updates the page; the configuration on LittleFS is not touched.
 
@@ -105,8 +114,9 @@ All endpoints require the same login as the page.
 | `GET` | `/api/status` | device state: firmware, uptime, free memory, Wi-Fi, access point, MQTT, active functions, output |
 | `GET` | `/api/config` | configuration; passwords are never returned, `<name>-set` tells whether one is stored |
 | `POST` | `/api/config` | JSON body with the keys to change; validated, saved, then the device restarts |
-| `POST` | `/api/restart` | restart the device |
+| `POST` | `/api/restart` | restart the device; `?mode=ap` restarts it in configuration (access point) mode |
 | `POST` | `/api/reset` | erase the configuration and restart |
+| `GET` | `/api/scan` | Wi-Fi networks in range, strongest first; `?refresh=1` starts a new scan. While `"scanning": true`, ask again after a second or two |
 
 Errors return `{"ok": false, "error": "<message>", "field": "<key>"}` with HTTP status 400 or 500.
 
@@ -269,8 +279,8 @@ data/store/config.json  configuration template for new devices (uploadfs)
 |---|---|---|
 | 0 | Minimal fixes (compile error, invalid `config.json`, credentials removed) | done |
 | 1 | PlatformIO, modular structure, non-blocking loop, web server always on, automatic access point, mDNS, IP in the payload | done |
-| 2 | JSON API and new configuration page (password editable, automatic restart) | **done** |
-| 3 | WiFi network selection from a scan | |
+| 2 | JSON API and new configuration page (password editable, automatic restart) | done |
+| 3 | WiFi network selection from a scan | **done** |
 | 4 | Functions and pins configurable from the web page ("Advanced" section) | |
 | 5 | Smart features (see below) | |
 | 6 | Remaining fixes and clean-up | |
