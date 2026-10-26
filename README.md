@@ -3,6 +3,8 @@
 
 Firmware for the devices of the **IOT eXperience** home automation ecosystem. Devices join the WiFi network and talk to the server **only through MQTT**. Each device serves its own web page for configuration.
 
+These devices were built together with **[IoteXperience](https://github.com/StarNiell/IoteXperience)**, the self-hosted home automation system they work with: web app, API server and MQTT broker. Its app shows and controls the switches, buttons, sensors and contacts driven by this firmware.
+
 > **Project status**: the firmware is being refactored in steps (see [Roadmap](#roadmap)). This document describes the **current** firmware and is updated at every step.
 
 ---
@@ -295,4 +297,4 @@ Smart features planned for step 5:
 - state restore after a power loss
 - online/offline status (MQTT Last Will) on `iotx/status/<uid>`
 
-The MQTT format stays compatible with IotxApp; it will be revised together with the IOTeXperience server.
+The MQTT format stays compatible with [IotxApp](https://github.com/StarNiell/IoteXperience/tree/main/IotxApp); it will be revised together with the [IoteXperience](https://github.com/StarNiell/IoteXperience) server.
